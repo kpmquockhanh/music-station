@@ -39,6 +39,8 @@ export function NowPlaying({ current, playback, serverNow, send }: Props) {
     setDrag(null)
     void send('player:seek', { position: target })
   }
+  // iOS may cancel a drag (a scroll or a system gesture) without a pointerup; drop it without seeking.
+  const cancelSeek = () => setDrag(null)
 
   return (
     <section className="flex flex-col gap-4 rounded-2xl bg-zinc-900 p-4">
@@ -65,6 +67,8 @@ export function NowPlaying({ current, playback, serverNow, send }: Props) {
             onChange={(e) => setDrag(Number(e.target.value))}
             onPointerUp={commitSeek}
             onKeyUp={commitSeek}
+            onPointerCancel={cancelSeek}
+            onBlur={cancelSeek}
             className="w-full accent-emerald-500"
           />
           <div className="flex justify-between text-xs tabular-nums text-zinc-400">

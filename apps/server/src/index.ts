@@ -3,6 +3,7 @@ import { loadConfig } from './config'
 import { createYouTube } from './youtube'
 
 const UPDATE_EVERY_MS = 24 * 60 * 60 * 1000
+const STOP_TIMEOUT_MS = 5_000
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env)
@@ -31,8 +32,20 @@ async function main(): Promise<void> {
     stopping = true
     console.log(`${signal} received, saving and shutting down`)
     clearInterval(updates)
-    await app.close()
-    process.exit(0)
+    // close() saves first, then waits for open responses; do not let a stuck one block the exit.
+    setTimeout(() => {
+      console.error('Shutdown took too long, exiting')
+      process.exit(1)
+    }, STOP_TIMEOUT_MS).unref()
+    let code = 0
+    try {
+      await app.close()
+    } catch (err) {
+      console.error(`Shutdown failed: ${String(err)}`)
+      code = 1
+    } finally {
+      process.exit(code)
+    }
   }
   process.on('SIGTERM', () => void stop('SIGTERM'))
   process.on('SIGINT', () => void stop('SIGINT'))

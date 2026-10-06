@@ -1,6 +1,7 @@
 import { parseVideoLink } from '@music-station/shared'
 
 export function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds)) return '0:00'
   const total = Math.max(0, Math.floor(seconds))
   const h = Math.floor(total / 3_600)
   const m = Math.floor((total % 3_600) / 60)

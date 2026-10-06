@@ -8,7 +8,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 # Current yt-dlp versions need a JavaScript runtime to read YouTube's player code.
-COPY --from=denoland/deno:bin /deno /usr/local/bin/deno
+COPY --from=denoland/deno:bin-2.9.7 /deno /usr/local/bin/deno
 
 # The standalone yt-dlp build for this CPU. It stays writable so `yt-dlp -U` can replace it.
 RUN mkdir -p /opt/yt-dlp \

@@ -11,6 +11,10 @@ describe('formatTime', () => {
   ])('formats %s as %s', (seconds, text) => {
     expect(formatTime(seconds)).toBe(text)
   })
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])('formats %s as 0:00', (seconds) => {
+    expect(formatTime(seconds)).toBe('0:00')
+  })
 })
 
 describe('classifyInput', () => {

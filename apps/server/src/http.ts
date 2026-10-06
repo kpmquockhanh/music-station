@@ -15,8 +15,9 @@ export interface HttpOptions {
 const AUDIO_RE = /^([A-Za-z0-9_-]{11})\.m4a$/
 
 export async function buildHttp(opts: HttpOptions): Promise<FastifyInstance> {
-  // trustProxy: requests arrive through the Tailscale proxy, so use X-Forwarded-For for per-IP limits.
-  const app = Fastify({ logger: opts.logger ?? false, trustProxy: true })
+  // Funnel's serve proxy dials 127.0.0.1:3000, so trust X-Forwarded-For only from loopback.
+  // A direct client on port 3000 could otherwise pick a new IP per request and dodge the limit.
+  const app = Fastify({ logger: opts.logger ?? false, trustProxy: 'loopback' })
 
   await app.register(rateLimit, { global: false })
   // One static instance: it serves the web UI when webDir is set, and always provides reply.sendFile.

@@ -88,10 +88,11 @@ export async function createApp(deps: AppDeps): Promise<App> {
       clearInterval(tick)
       clearInterval(periodicSave)
       realtime?.close() // before disconnecting, so no leave timers are scheduled
+      // Save first: http.close() waits for open responses, such as audio streams, and may never return.
+      await saver.flush()
       io.disconnectSockets(true)
       io.engine.close()
       await http.close()
-      await saver.flush()
     },
   }
 }

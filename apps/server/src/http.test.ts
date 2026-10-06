@@ -90,6 +90,15 @@ describe('/api/search', () => {
     for (let i = 0; i < 30; i++) expect((await app.inject('/api/search?q=x')).statusCode).toBe(200)
     expect((await app.inject('/api/search?q=x')).statusCode).toBe(429)
   })
+
+  it('trusts X-Forwarded-For only from the local proxy', async () => {
+    await build()
+    const search = (remoteAddress: string, ip: string) =>
+      app.inject({ url: '/api/search?q=x', remoteAddress, headers: { 'x-forwarded-for': ip } })
+    for (let i = 0; i < 30; i++) expect((await search('10.0.0.5', `1.2.3.${i}`)).statusCode).toBe(200)
+    expect((await search('10.0.0.5', '1.2.3.99')).statusCode).toBe(429) // a spoofed header buys nothing
+    expect((await search('127.0.0.1', '5.6.7.8')).statusCode).toBe(200) // Funnel users keep their own limit
+  })
 })
 
 describe('web UI', () => {

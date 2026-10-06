@@ -1,6 +1,6 @@
 services:
   tailscale:
-    image: tailscale/tailscale:latest
+    image: tailscale/tailscale:v1.102.5
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:?Set TS_AUTHKEY in .env}
       TS_HOSTNAME: music-station

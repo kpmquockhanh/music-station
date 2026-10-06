@@ -199,4 +199,36 @@ describe('music station server', () => {
     expect(saved?.savedAt).toBe(clock)
     expect(saved?.playback.status).toBe('playing')
   })
+
+  it('saves the station on close while a response is still open', async () => {
+    await app!.close()
+    await rm(join(dataDir, 'station.json')) // only the final save may write it now
+    let reached!: () => void
+    const searching = new Promise<void>((r) => (reached = r))
+    const search = () => {
+      reached()
+      return new Promise<never>(() => {}) // like an /audio stream to a slow phone
+    }
+    await start({ saveDelayMs: 60_000, youtube: { ...youtube, search } })
+    const a = client()
+    await send(a, 'join', { clientId: randomUUID(), nickname: 'Minh' })
+    const ready = waitFor<StationState>(a, 'state', playingReady)
+    await send(a, 'queue:add', { input: ID })
+    await ready
+    const aborter = new AbortController()
+    const open = fetch(`${url}/api/search?q=slow`, { signal: aborter.signal }).catch(() => {})
+    await searching
+
+    const closing = app!.close()
+    app = undefined
+    let saved = null
+    for (let i = 0; i < 20 && !saved; i++) {
+      await sleep(25)
+      saved = await loadState(join(dataDir, 'station.json'))
+    }
+    aborter.abort()
+    await open
+    await closing
+    expect(saved?.current).toMatchObject({ videoId: ID })
+  })
 })

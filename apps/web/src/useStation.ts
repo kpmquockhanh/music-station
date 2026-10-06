@@ -67,6 +67,12 @@ async function ask(socket: Socket, event: string, payload: unknown, timeoutMs: n
   }
 }
 
+export function sendAction(socket: Socket, event: ActionEvent, payload: object): Promise<Ack> {
+  // Socket.IO buffers emits while offline and sends them before the rejoin, so the server would refuse them.
+  if (!socket.connected) return Promise.resolve({ ok: false, error: 'Reconnecting, try again in a moment' })
+  return ask(socket, event, payload, ACTION_TIMEOUT_MS)
+}
+
 export function useStation(): Station {
   const [clientId] = useState(() => getClientId())
   const [state, setState] = useState<StationState | null>(null)
@@ -112,7 +118,11 @@ export function useStation(): Station {
       setConnected(true)
       void clock.measure().then(handToPlayer)
       const nickname = nicknameRef.current
-      if (nickname) void ask(socket, 'join', { clientId, nickname }, JOIN_TIMEOUT_MS) // rejoin after a drop
+      if (!nickname) return
+      // Rejoin after a drop. Staying on this screen keeps the player's file; going back to Join would not.
+      void ask(socket, 'join', { clientId, nickname }, JOIN_TIMEOUT_MS).then((res) => {
+        if (!res.ok) notify(`Could not rejoin the station: ${res.error}`, 'error')
+      })
     })
     socket.on('disconnect', () => setConnected(false))
     socket.on('state', (s: StationState) => {
@@ -166,7 +176,7 @@ export function useStation(): Station {
     async (event: ActionEvent, payload: object = {}): Promise<Ack> => {
       const c = conn.current
       if (!c) return { ok: false, error: 'Not connected' }
-      const res = await ask(c.socket, event, payload, ACTION_TIMEOUT_MS)
+      const res = await sendAction(c.socket, event, payload)
       if (!res.ok) notify(res.error, 'error')
       return res
     },
