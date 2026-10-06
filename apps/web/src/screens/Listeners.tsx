@@ -1,19 +1,20 @@
 import type { Listener } from '@music-station/shared'
+import { Avatar } from '../ui'
 
 export function Listeners({ listeners, me }: { listeners: Listener[]; me: string }) {
+  // You first, then everyone else in join order.
+  const sorted = [...listeners].sort((a, b) => Number(b.id === me) - Number(a.id === me))
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="px-1 text-sm font-semibold uppercase tracking-wide text-zinc-400">
-        Listening ({listeners.length})
-      </h2>
-      <ul className="flex flex-wrap gap-2">
-        {listeners.map((l) => (
-          <li key={l.id} className="rounded-full bg-zinc-900 px-3 py-1 text-sm">
-            {l.nickname}
-            {l.id === me && <span className="text-zinc-500"> (you)</span>}
-          </li>
-        ))}
-      </ul>
-    </section>
+    <ul className="grid grid-cols-1 gap-1 min-[420px]:grid-cols-2">
+      {sorted.map((l) => (
+        <li key={l.id} className="flex min-w-0 items-center gap-3 rounded-2xl p-2">
+          <Avatar name={l.nickname} />
+          <span className="min-w-0 truncate font-medium">{l.nickname}</span>
+          {l.id === me && (
+            <span className="shrink-0 rounded-full bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent">You</span>
+          )}
+        </li>
+      ))}
+    </ul>
   )
 }
