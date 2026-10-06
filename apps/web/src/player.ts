@@ -1,15 +1,21 @@
 import { decideCorrection, targetPosition, type Playback, type QueueItem } from '@music-station/shared'
 
+type AudioEvent = 'canplay' | 'loadedmetadata' | 'pause'
+
 export interface AudioLike {
   src: string
   currentTime: number
   playbackRate: number
   preservesPitch: boolean
   readonly paused: boolean
+  readonly readyState: number
+  readonly seeking: boolean
+  readonly ended: boolean
   play(): Promise<void>
   pause(): void
-  addEventListener(type: 'canplay', fn: () => void): void
-  removeEventListener(type: 'canplay', fn: () => void): void
+  load(): void
+  addEventListener(type: AudioEvent, fn: () => void): void
+  removeEventListener(type: AudioEvent, fn: () => void): void
 }
 
 export interface PlayerDeps {
@@ -21,6 +27,8 @@ export interface PlayerDeps {
 
 const CORRECT_EVERY_MS = 250
 const PARK_TOLERANCE_S = 0.05
+const HAVE_METADATA = 1
+const HAVE_FUTURE_DATA = 3
 
 const samePlayback = (a: Playback, b: Playback) =>
   a.status === b.status && a.position === b.position && a.at === b.at
@@ -31,6 +39,8 @@ export class SyncPlayer {
   private src: string | null = null
   private canPlay = false
   private blocked = false
+  /** True while the player expects the element to play, so a pause event it did not cause is external. */
+  private wantPlaying = false
   private current: QueueItem | null = null
   private playback: Playback = { status: 'paused', position: 0, at: 0 }
   private leadTimer: ReturnType<typeof setTimeout> | null = null
@@ -39,7 +49,10 @@ export class SyncPlayer {
   constructor(deps: PlayerDeps) {
     this.deps = deps
     deps.audio.preservesPitch = true
+    // iOS may hold readyState at HAVE_METADATA until play(), so canplay can never come (Ruling R11).
+    deps.audio.addEventListener('loadedmetadata', this.onCanPlay)
     deps.audio.addEventListener('canplay', this.onCanPlay)
+    deps.audio.addEventListener('pause', this.onPause)
     this.loop = setInterval(() => this.correct(), CORRECT_EVERY_MS)
   }
 
@@ -49,23 +62,43 @@ export class SyncPlayer {
     this.current = current
     this.playback = playback
     if (src !== this.src) {
+      const { audio } = this.deps
       this.src = src
       this.canPlay = false
       this.clearLead()
-      this.deps.audio.pause()
-      if (src) this.deps.audio.src = src // apply() runs on canplay
+      this.pauseAudio()
+      if (src) {
+        audio.src = src
+        audio.load() // iOS does not preload; apply() runs on loadedmetadata or canplay
+        if (audio.readyState >= HAVE_METADATA) this.onCanPlay()
+      }
       return
     }
     this.apply()
   }
 
+  /** Runs inside the "Tap to resume" gesture. */
   resume(): void {
     this.blocked = false
+    // Play before apply(), while the tap still counts. A pending lead-in pauses it again, now unlocked.
+    if (this.src) this.deps.audio.play().catch(() => {})
+    this.apply()
+  }
+
+  /** Restarts an element that stopped without a banner, such as after a failed play(). Never touches one that plays. */
+  realign(): void {
+    const { audio } = this.deps
+    if (!this.canPlay || this.blocked || this.playback.status !== 'playing') return
+    if (!audio.paused || audio.ended || this.leadTimer) return
     this.apply()
   }
 
   correct(): void {
     const { audio } = this.deps
+    if (audio.seeking || audio.readyState < HAVE_FUTURE_DATA) {
+      this.lastDrift = null
+      return
+    }
     const p = this.playback
     if (!this.canPlay || this.leadTimer || p.status !== 'playing' || audio.paused || !this.current) {
       this.lastDrift = null
@@ -80,10 +113,13 @@ export class SyncPlayer {
   }
 
   destroy(): void {
+    const { audio } = this.deps
     clearInterval(this.loop)
     this.clearLead()
-    this.deps.audio.removeEventListener('canplay', this.onCanPlay)
-    this.deps.audio.pause()
+    audio.removeEventListener('loadedmetadata', this.onCanPlay)
+    audio.removeEventListener('canplay', this.onCanPlay)
+    audio.removeEventListener('pause', this.onPause)
+    this.pauseAudio()
   }
 
   private readonly onCanPlay = (): void => {
@@ -92,20 +128,30 @@ export class SyncPlayer {
     this.apply()
   }
 
+  // A call, Siri or AirPods paused the audio (Ruling R12). Pause events arrive in a later task, so the
+  // player's own pauses have already cleared wantPlaying, and one that a newer play() overtook finds it playing.
+  private readonly onPause = (): void => {
+    const { audio } = this.deps
+    if (!this.wantPlaying || !audio.paused || audio.ended || this.playback.status !== 'playing') return
+    this.wantPlaying = false
+    this.blocked = true
+    this.deps.onBlocked()
+  }
+
   private apply(): void {
     const { audio } = this.deps
     this.clearLead()
     if (!this.canPlay) return
     const p = this.playback
     if (p.status !== 'playing') {
-      audio.pause()
+      this.pauseAudio()
       audio.playbackRate = 1
       this.park(p.position)
       return
     }
     const startInMs = p.at - this.deps.serverNow() - this.deps.delayMs()
     if (startInMs > 0) {
-      audio.pause()
+      this.pauseAudio()
       this.park(p.position)
       this.leadTimer = setTimeout(() => {
         this.leadTimer = null
@@ -121,14 +167,23 @@ export class SyncPlayer {
     if (this.blocked) return
     this.park(this.target())
     audio.playbackRate = 1
+    this.wantPlaying = true
     if (!audio.paused) return
     audio.play().catch((err: unknown) => {
       // AbortError just means a newer pause or src change won; only the autoplay policy needs the user.
+      if (err instanceof Error && err.name === 'AbortError') return
+      this.wantPlaying = false // realign() retries other failures
       if (err instanceof Error && err.name === 'NotAllowedError') {
         this.blocked = true
         this.deps.onBlocked()
       }
     })
+  }
+
+  /** Every pause the player makes goes through here, so onPause can tell them from external ones. */
+  private pauseAudio(): void {
+    this.wantPlaying = false
+    this.deps.audio.pause()
   }
 
   private park(position: number): void {

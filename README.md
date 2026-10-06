@@ -85,7 +85,7 @@ The app log then shows `YouTube bot check hit`, and songs fail to add. Try these
 3. Open **Settings** on each device. After a few seconds, **Drift** should stay within about ±30 ms.
 4. On a device that plays through a Bluetooth speaker, raise **Speaker delay** until its ticks line up with the others.
 
-If a device shows **Tap to resume audio**, its browser blocked playback. Tap the button once.
+If a device shows **Tap to resume audio**, its browser blocked playback or the phone paused it. Tap the button once.
 
 ## Development
 
@@ -107,5 +107,6 @@ Run the two `dev` commands in separate terminals and open http://localhost:5173.
 
 ## Known limits
 
-- A locked iPhone may not start the next song by itself. Unlock it and tap **Tap to resume audio**.
+- **Tap to resume audio** appears when the browser blocks autoplay or the phone pauses the audio (a call, Siri, AirPods). Tap it to rejoin at the shared position.
+- A locked iPhone may not start the next song by itself. Unlock it, and tap the banner if it appears.
 - yt-dlp breaks when YouTube changes something. The daily update usually brings a fix within a day or two.

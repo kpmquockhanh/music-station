@@ -2,34 +2,75 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Playback, QueueItem } from '@music-station/shared'
 import { SyncPlayer, type AudioLike } from './player'
 
+type AudioEvent = 'canplay' | 'loadedmetadata' | 'pause'
+
 class FakeAudio implements AudioLike {
   src = ''
-  currentTime = 0
   playbackRate = 1
   preservesPitch = false
   paused = true
-  blockPlay = false
+  readyState = 0
+  seeking = false
+  ended = false
+  /** The error name play() rejects with, such as NotAllowedError for the autoplay policy. */
+  playError: string | null = null
+  /** Some browsers already have metadata when load() returns. */
+  metadataOnLoad = false
   plays = 0
-  private handlers = new Set<() => void>()
+  loads = 0
+  seeks = 0
+  private time = 0
+  private handlers = new Map<AudioEvent, Set<() => void>>()
 
+  get currentTime(): number {
+    return this.time
+  }
+  set currentTime(value: number) {
+    this.time = value
+    this.seeks++
+  }
   play(): Promise<void> {
     this.plays++
-    if (this.blockPlay) return Promise.reject(Object.assign(new Error('blocked'), { name: 'NotAllowedError' }))
+    if (this.playError) return Promise.reject(Object.assign(new Error('play failed'), { name: this.playError }))
     this.paused = false
+    this.ended = false
     return Promise.resolve()
   }
+  /** Like a real element: no event when already paused, otherwise the event arrives in a later task. */
   pause(): void {
+    if (this.paused) return
     this.paused = true
+    setTimeout(() => this.emit('pause'), 0)
   }
-  addEventListener(_type: 'canplay', fn: () => void): void {
-    this.handlers.add(fn)
+  load(): void {
+    this.loads++
+    this.readyState = this.metadataOnLoad ? 1 : 0
   }
-  removeEventListener(_type: 'canplay', fn: () => void): void {
-    this.handlers.delete(fn)
+  addEventListener(type: AudioEvent, fn: () => void): void {
+    if (!this.handlers.has(type)) this.handlers.set(type, new Set())
+    this.handlers.get(type)!.add(fn)
+  }
+  removeEventListener(type: AudioEvent, fn: () => void): void {
+    this.handlers.get(type)?.delete(fn)
+  }
+  emit(type: AudioEvent): void {
+    for (const fn of this.handlers.get(type) ?? []) fn()
   }
   /** Simulates the browser finishing loading the file. */
   loaded(): void {
-    for (const fn of this.handlers) fn()
+    this.readyState = 4
+    this.emit('loadedmetadata')
+    this.emit('canplay')
+  }
+  /** Simulates iOS, which can stop at HAVE_METADATA and never fire canplay before play(). */
+  metadataOnly(): void {
+    this.readyState = 1
+    this.emit('loadedmetadata')
+  }
+  /** Simulates the song reaching its natural end: pause fires before ended. */
+  finish(): void {
+    this.ended = true
+    this.pause()
   }
 }
 
@@ -163,7 +204,7 @@ describe('SyncPlayer', () => {
   })
 
   it('reports blocked autoplay once and retries only on resume()', async () => {
-    audio.blockPlay = true
+    audio.playError = 'NotAllowedError'
     player.update(item(A), playing(0, T0 - 1_000))
     audio.loaded()
     await settle()
@@ -173,7 +214,7 @@ describe('SyncPlayer', () => {
     await vi.advanceTimersByTimeAsync(1_000)
     expect(audio.plays).toBe(1)
 
-    audio.blockPlay = false
+    audio.playError = null
     player.resume()
     await settle()
     expect(audio.plays).toBe(2)
@@ -218,5 +259,206 @@ describe('SyncPlayer', () => {
     audio.loaded()
     player.destroy()
     expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe('SyncPlayer on iOS', () => {
+  it('aligns on loadedmetadata alone and plays at the lead time on the target', async () => {
+    player.update(item(A), playing(30, T0 + 1_000))
+    expect(audio.loads).toBe(1)
+    audio.metadataOnly()
+    await vi.advanceTimersByTimeAsync(999)
+    expect(audio.plays).toBe(0)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(audio.plays).toBe(1)
+    expect(audio.paused).toBe(false)
+    expect(audio.currentTime).toBe(30)
+  })
+
+  it('aligns without any event when the element already has metadata after load()', async () => {
+    audio.metadataOnLoad = true
+    player.update(item(A), playing(10, T0 - 5_000))
+    await settle()
+    expect(audio.plays).toBe(1)
+    expect(audio.currentTime).toBeCloseTo(15)
+  })
+})
+
+describe('SyncPlayer drift correction while buffering', () => {
+  const drifted = async () => {
+    player.update(item(A), playing(0, T0 - 10_000)) // the target is 10 s while the clock stands still
+    audio.loaded()
+    await settle()
+    audio.currentTime = 12
+    audio.playbackRate = 0.97
+    audio.seeks = 0
+  }
+
+  it('leaves a seeking element alone', async () => {
+    await drifted()
+    audio.seeking = true
+    player.correct()
+    expect(audio.currentTime).toBe(12)
+    expect(audio.playbackRate).toBe(0.97)
+    expect(audio.seeks).toBe(0)
+  })
+
+  it('leaves an element without enough data alone', async () => {
+    await drifted()
+    audio.readyState = 2
+    player.correct()
+    expect(audio.currentTime).toBe(12)
+    expect(audio.playbackRate).toBe(0.97)
+    expect(audio.seeks).toBe(0)
+  })
+
+  it('seeks exactly once when the element is ready', async () => {
+    await drifted()
+    player.correct()
+    player.correct()
+    expect(audio.seeks).toBe(1)
+    expect(audio.currentTime).toBe(10)
+    expect(audio.playbackRate).toBe(1)
+  })
+})
+
+describe('SyncPlayer pauses from outside', () => {
+  const playingAt10 = async () => {
+    player.update(item(A), playing(0, T0 - 10_000))
+    audio.loaded()
+    await settle()
+    expect(audio.paused).toBe(false)
+  }
+
+  it('shows the banner once when something else pauses the audio', async () => {
+    await playingAt10()
+    audio.pause() // a phone call, Siri or AirPods
+    await settle()
+    expect(blocked).toBe(1)
+    audio.emit('pause')
+    player.realign()
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(blocked).toBe(1)
+    expect(audio.plays).toBe(1)
+
+    player.resume()
+    await settle()
+    expect(audio.plays).toBe(2)
+    expect(audio.paused).toBe(false)
+    expect(audio.currentTime).toBeCloseTo(11)
+  })
+
+  it('does not show the banner when it changes the song', async () => {
+    await playingAt10()
+    player.update(item(B), playing(0, T0 + 1_000))
+    await settle()
+    audio.loaded()
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(audio.paused).toBe(false)
+    expect(blocked).toBe(0)
+  })
+
+  it('does not show the banner when the station pauses', async () => {
+    await playingAt10()
+    player.update(item(A), paused(42))
+    await settle()
+    expect(audio.paused).toBe(true)
+    expect(blocked).toBe(0)
+  })
+
+  it('does not show the banner while it waits out a lead-in', async () => {
+    await playingAt10()
+    player.update(item(A), playing(30, T0 + 1_000))
+    await settle()
+    expect(audio.paused).toBe(true)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(audio.paused).toBe(false)
+    expect(blocked).toBe(0)
+  })
+
+  it('does not show the banner when the song ends', async () => {
+    await playingAt10()
+    audio.finish()
+    await settle()
+    expect(blocked).toBe(0)
+  })
+
+  it('realign() restarts an element paused from outside on the target', async () => {
+    await playingAt10()
+    await vi.advanceTimersByTimeAsync(5_000)
+    audio.pause() // its pause event is still queued when the tab becomes visible
+    player.realign()
+    expect(audio.plays).toBe(2)
+    expect(audio.paused).toBe(false)
+    expect(audio.currentTime).toBeCloseTo(15)
+    await settle()
+    expect(blocked).toBe(0)
+  })
+
+  it('realign() retries a play() that failed for a reason other than autoplay', async () => {
+    audio.playError = 'NotSupportedError'
+    player.update(item(A), playing(0, T0 - 10_000))
+    audio.loaded()
+    await settle()
+    expect(audio.paused).toBe(true)
+    expect(blocked).toBe(0)
+    audio.playError = null
+    player.realign()
+    await settle()
+    expect(audio.plays).toBe(2)
+    expect(audio.paused).toBe(false)
+    expect(audio.currentTime).toBeCloseTo(10)
+  })
+
+  it('realign() does not restart a song that ended before the server moved on', async () => {
+    await playingAt10()
+    audio.finish()
+    await settle()
+    player.realign()
+    expect(audio.plays).toBe(1)
+    expect(audio.paused).toBe(true)
+  })
+
+  it('realign() leaves a playing element alone', async () => {
+    await playingAt10()
+    audio.currentTime = 10.2
+    audio.seeks = 0
+    player.realign()
+    expect(audio.currentTime).toBe(10.2)
+    expect(audio.seeks).toBe(0)
+    expect(audio.plays).toBe(1)
+  })
+})
+
+describe('SyncPlayer resume()', () => {
+  it('calls play() inside the tap even while a lead-in is pending', async () => {
+    audio.playError = 'NotAllowedError'
+    player.update(item(A), playing(0, T0 - 1_000))
+    audio.loaded()
+    await settle()
+    expect(blocked).toBe(1)
+    player.update(item(A), playing(5, T0 + 1_000))
+    audio.playError = null
+
+    player.resume()
+    expect(audio.plays).toBe(2) // synchronously, before any timer runs
+    expect(audio.paused).toBe(true) // paused again for the lead-in, now unlocked
+    expect(audio.currentTime).toBe(5)
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(audio.plays).toBe(3)
+    expect(audio.paused).toBe(false)
+    expect(audio.currentTime).toBe(5)
+    expect(blocked).toBe(1)
+  })
+
+  it('does not replay the old file when the station has gone idle', async () => {
+    player.update(item(A), playing(0, T0 - 1_000))
+    audio.loaded()
+    await settle()
+    player.update(null, paused(0))
+    player.resume()
+    expect(audio.plays).toBe(1)
+    expect(audio.paused).toBe(true)
   })
 })

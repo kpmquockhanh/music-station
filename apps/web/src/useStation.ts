@@ -122,9 +122,10 @@ export function useStation(): Station {
     })
     socket.on('activity', (a: Activity) => notify(a.text))
 
-    const resync = setInterval(() => void clock.measure(), RESYNC_MS)
+    // realign() restarts audio that stopped without a banner; it never touches audio that is playing.
+    const resync = setInterval(() => void clock.measure().then(() => player.realign()), RESYNC_MS)
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void clock.measure().then(() => player.correct())
+      if (document.visibilityState === 'visible') void clock.measure().then(() => player.realign())
     }
     document.addEventListener('visibilitychange', onVisible)
 
