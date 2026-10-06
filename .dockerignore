@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+data
+docs
+.env
+.git
+*.log
+.DS_Store
+.claude
+.superpowers
