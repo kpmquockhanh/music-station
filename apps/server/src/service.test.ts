@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
-import type { VideoInfo } from '@music-station/shared'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { MAX_QUEUE, type VideoInfo } from '@music-station/shared'
 import { Station, StationError } from './station'
 import { StationService, type CacheLike } from './service'
 import type { Persisted } from './persist'
@@ -7,6 +7,10 @@ import type { Persisted } from './persist'
 const A = 'aaaaaaaaaaa'
 const B = 'bbbbbbbbbbb'
 const flush = () => new Promise((r) => setImmediate(r))
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 function setup(opts: { cached?: string[]; getInfo?: (id: string) => Promise<VideoInfo> } = {}) {
   const files = new Set(opts.cached ?? [])
@@ -31,6 +35,7 @@ function setup(opts: { cached?: string[]; getInfo?: (id: string) => Promise<Vide
   } satisfies CacheLike
   let t = 0
   const activity: string[] = []
+  const logs: string[] = []
   const onChange = vi.fn()
   const getInfo = vi.fn(
     opts.getInfo ??
@@ -50,12 +55,71 @@ function setup(opts: { cached?: string[]; getInfo?: (id: string) => Promise<Vide
     now: () => t,
     onChange,
     onActivity: (text) => activity.push(text),
-    log: () => {},
+    log: (msg) => logs.push(msg),
   })
   service.join('l1', 'Minh')
   activity.length = 0
-  return { service, cache, pending, files, activity, onChange, getInfo, setTime: (v: number) => (t = v) }
+  return { service, station, cache, pending, files, activity, logs, onChange, getInfo, setTime: (v: number) => (t = v) }
 }
+
+const info = (id: string): VideoInfo => ({ videoId: id, title: `Song ${id}`, channel: 'Ch', duration: 100, thumbnail: 't' })
+
+/** A getInfo whose calls wait until the test resolves them, counting how many run at once. */
+function deferredInfo() {
+  const calls: { id: string; resolve: () => void }[] = []
+  let running = 0
+  let peak = 0
+  const getInfo = (id: string) =>
+    new Promise<VideoInfo>((resolve) => {
+      peak = Math.max(peak, ++running)
+      calls.push({
+        id,
+        resolve: () => {
+          running--
+          resolve(info(id))
+        },
+      })
+    })
+  return { calls, getInfo, peak: () => peak }
+}
+
+describe('metadata lookups', () => {
+  it('runs at most two getInfo calls at once and queues every song', async () => {
+    const ids = ['aaaaaaaaaa1', 'aaaaaaaaaa2', 'aaaaaaaaaa3', 'aaaaaaaaaa4', 'aaaaaaaaaa5', 'aaaaaaaaaa6']
+    const d = deferredInfo()
+    const s = setup({ getInfo: d.getInfo })
+    const adds = ids.map((id) => s.service.add('l1', id))
+    for (let i = 0; i < ids.length; i++) {
+      await flush()
+      d.calls[i]!.resolve()
+    }
+    await Promise.all(adds)
+    expect(d.peak()).toBeLessThanOrEqual(2)
+    const st = s.service.state()
+    expect([st.current!, ...st.queue].map((q) => q.videoId).sort()).toEqual(ids)
+  })
+
+  it('looks up the same video once when it is added twice at the same time', async () => {
+    const d = deferredInfo()
+    const s = setup({ getInfo: d.getInfo })
+    const adds = [s.service.add('l1', A), s.service.add('l1', A)]
+    await flush()
+    expect(s.getInfo).toHaveBeenCalledOnce()
+    d.calls[0]!.resolve()
+    await Promise.all(adds)
+    const st = s.service.state()
+    expect([st.current!, ...st.queue].map((q) => q.videoId)).toEqual([A, A])
+  })
+
+  it('rejects an add to a full queue without calling getInfo', async () => {
+    const s = setup()
+    for (let i = 0; i <= MAX_QUEUE; i++) {
+      s.station.add({ ...info(B), id: `q${i}`, videoId: B, addedBy: 'Minh', status: 'ready' }, 0)
+    }
+    await expect(s.service.add('l1', A)).rejects.toThrow(new StationError('The queue is full'))
+    expect(s.getInfo).not.toHaveBeenCalled()
+  })
+})
 
 describe('add', () => {
   it('validates the video, queues it as downloading and starts the download', async () => {
@@ -135,6 +199,42 @@ describe('download failures', () => {
     const st = s.service.state()
     expect(st.current!.videoId).toBe(B)
     expect(s.activity.at(-1)).toBe("Couldn't download Song A: Video unavailable")
+  })
+
+  it('keeps a downloaded song ready when evicting old files fails', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const s = setup()
+    s.cache.evict.mockImplementation(() => {
+      throw new Error('EACCES')
+    })
+    await s.service.add('l1', A)
+    s.pending[0]!.resolve()
+    await flush()
+    expect(s.service.state().current!.status).toBe('ready')
+    expect(s.service.state().playback.status).toBe('playing')
+    expect(s.activity).toEqual(['Minh added Song A'])
+    expect(s.logs.filter((l) => l.includes('failed'))).toEqual([])
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining('EACCES'))
+  })
+
+  it('leaves no unhandled rejection when onChange throws after a download', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+    try {
+      const s = setup()
+      await s.service.add('l1', A)
+      s.onChange.mockImplementation(() => {
+        throw new Error('broadcast failed')
+      })
+      s.pending[0]!.resolve()
+      await flush()
+      await flush()
+      expect(unhandled).not.toHaveBeenCalled()
+      expect(errors).toHaveBeenCalledWith(expect.stringContaining('broadcast failed'))
+    } finally {
+      process.off('unhandledRejection', unhandled)
+    }
   })
 })
 

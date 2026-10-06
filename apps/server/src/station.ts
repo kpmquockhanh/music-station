@@ -35,8 +35,12 @@ export class Station {
     return this.listeners.get(listenerId)
   }
 
-  add(item: QueueItem, now: number): void {
+  assertRoom(): void {
     if (this.queue.length >= MAX_QUEUE) throw new StationError('The queue is full')
+  }
+
+  add(item: QueueItem, now: number): void {
+    this.assertRoom()
     if (this.current) this.queue.push(item)
     else this.setCurrent(item, now)
   }

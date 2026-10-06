@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import pLimit from 'p-limit'
 import { parseVideoInput, type QueueItem, type StationState, type VideoInfo } from '@music-station/shared'
 import type { Persisted } from './persist'
 import { Station, StationError } from './station'
@@ -30,6 +31,9 @@ function clock(seconds: number): string {
 export class StationService {
   private downloading = new Set<string>()
   private lastCurrentId: string | null = null
+  // Each lookup spawns yt-dlp, so cap them and share one per video.
+  private infoLimit = pLimit(2)
+  private lookups = new Map<string, Promise<VideoInfo>>()
 
   constructor(private deps: ServiceDeps) {}
 
@@ -71,9 +75,10 @@ export class StationService {
     const nickname = this.who(listenerId)
     const videoId = parseVideoInput(input)
     if (!videoId) throw new StationError('That is not a YouTube video link')
+    this.deps.station.assertRoom() // station.add checks again, as the queue can fill during the lookup
     let info: VideoInfo
     try {
-      info = await this.deps.getInfo(videoId)
+      info = await this.lookup(videoId)
     } catch (err) {
       throw new StationError(message(err))
     }
@@ -145,14 +150,24 @@ export class StationService {
     this.changed()
   }
 
+  private lookup(videoId: string): Promise<VideoInfo> {
+    let pending = this.lookups.get(videoId)
+    if (!pending) {
+      pending = this.infoLimit(() => this.deps.getInfo(videoId)).finally(() => this.lookups.delete(videoId))
+      this.lookups.set(videoId, pending)
+    }
+    return pending
+  }
+
   private startDownload(videoId: string): void {
     if (this.downloading.has(videoId)) return
     this.downloading.add(videoId)
-    void this.download(videoId)
+    void this.download(videoId).catch((err) => console.error(`Download of ${videoId} crashed: ${message(err)}`))
   }
 
   private async download(videoId: string): Promise<void> {
     const { station, cache, log = console.log } = this.deps
+    let ready = false
     try {
       try {
         await cache.ensure(videoId)
@@ -161,7 +176,7 @@ export class StationService {
         await cache.ensure(videoId)
       }
       station.markReady(videoId, this.deps.now())
-      cache.evict(station.protectedIds())
+      ready = true
     } catch (err) {
       log(`Download of ${videoId} failed: ${message(err)}`)
       const failed = station.markFailed(videoId, this.deps.now())
@@ -169,6 +184,12 @@ export class StationService {
     } finally {
       this.downloading.delete(videoId)
       this.changed()
+    }
+    if (!ready) return
+    try {
+      cache.evict(station.protectedIds())
+    } catch (err) {
+      console.error(`Evicting old songs failed: ${message(err)}`)
     }
   }
 
