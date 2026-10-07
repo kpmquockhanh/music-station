@@ -191,6 +191,17 @@ export class SyncPlayer {
     this.scheduleHandoff()
   }
 
+  /** Stops this device only, as when something outside pauses it: the "Tap to resume audio" banner appears. */
+  pauseHere(): void {
+    if (this.blocked || this.playback.status !== 'playing') return
+    this.blocked = true
+    this.clearLead()
+    this.clearHandoff()
+    this.stopRetiring() // the old song of a handoff in progress
+    this.pauseAudio() // clears wantPlaying first, so onPause ignores this pause
+    this.deps.onBlocked()
+  }
+
   /** Restarts an element that stopped without a banner, such as after a failed play(). Never touches one that plays. */
   realign(): void {
     const { audio } = this.active

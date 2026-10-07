@@ -52,6 +52,8 @@ export interface Station {
   join(nickname: string): Promise<Ack>
   send(event: ActionEvent, payload?: object): Promise<Ack>
   resume(): void
+  /** Stops this device only, as a call or AirPods would; resume() rejoins. */
+  pauseHere(): void
   setDelayMs(ms: number): void
   serverNow(): number
   debug(): DebugInfo
@@ -311,6 +313,8 @@ export function useStation(): Station {
     conn.current?.player.resume()
   }, [])
 
+  const pauseHere = useCallback(() => conn.current?.player.pauseHere(), [])
+
   const setDelayMs = useCallback((ms: number) => {
     const value = clampDelay(ms)
     delayRef.current = value
@@ -341,6 +345,7 @@ export function useStation(): Station {
     join,
     send,
     resume,
+    pauseHere,
     setDelayMs,
     serverNow,
     debug,

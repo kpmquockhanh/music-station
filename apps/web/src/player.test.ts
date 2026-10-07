@@ -569,6 +569,74 @@ describe('SyncPlayer resume()', () => {
   })
 })
 
+describe('SyncPlayer pauseHere()', () => {
+  const playingAt10 = async () => {
+    player.update(item(A), playing(0, T0 - 10_000))
+    audio.loaded()
+    await settle()
+    expect(audio.paused).toBe(false)
+  }
+
+  it('stops this device and shows the banner once', async () => {
+    await playingAt10()
+    player.pauseHere()
+    player.pauseHere()
+    await settle() // the pause event arrives and must not count as a second outside pause
+    expect(audio.paused).toBe(true)
+    expect(blocked).toBe(1)
+  })
+
+  it('stays silent through station updates and realign() until resume() rejoins', async () => {
+    await playingAt10()
+    player.pauseHere()
+    player.update(item(A), playing(20, T0)) // someone seeks to 0:20
+    await vi.advanceTimersByTimeAsync(2_000)
+    player.realign()
+    expect(audio.paused).toBe(true)
+    expect(audio.plays).toBe(1)
+
+    player.resume() // the Play key
+    expect(audio.plays).toBe(2)
+    expect(audio.paused).toBe(false)
+    expect(audio.currentTime).toBeCloseTo(22 + player.leadS)
+    expect(blocked).toBe(1)
+  })
+
+  it('keeps a new song silent after someone skips', async () => {
+    await playingAt10()
+    player.pauseHere()
+    player.update(item(B), playing(0, T0 + 1_000))
+    await settle()
+    audio.loaded()
+    expect(audio.src).toContain(B) // the new song did load
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(audio.paused).toBe(true)
+    expect(audio.plays).toBe(1)
+  })
+
+  it('cancels a pending lead-in', async () => {
+    await playingAt10()
+    player.update(item(A), playing(30, T0 + 1_000))
+    await settle()
+    player.pauseHere()
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(audio.paused).toBe(true)
+    expect(audio.plays).toBe(1)
+    expect(blocked).toBe(1)
+  })
+
+  it('does nothing while the station is paused', async () => {
+    player.update(item(A), paused(42))
+    audio.loaded()
+    await settle()
+    player.pauseHere()
+    expect(blocked).toBe(0)
+    player.update(item(A), playing(42, T0 + 1_000)) // the station plays again, and so does this device
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(audio.paused).toBe(false)
+  })
+})
+
 describe('SyncPlayer settling after a seek', () => {
   beforeEach(() => {
     player.destroy()
@@ -756,6 +824,17 @@ describe('SyncPlayer with a spare deck', () => {
     expect(audio.paused).toBe(true) // stopped as the new song started: no gap, no overlap
     expect(player.stats.handoffs).toBe(1)
     expect(spare.loads).toBe(1) // it never loaded at the change
+  })
+
+  it('pauseHere() during a handoff silences both songs', async () => {
+    await playingAWithBNext()
+    await vi.advanceTimersByTimeAsync(10_000 - 500) // the handoff: A plays out while B waits for the boundary
+    expect(audio.paused).toBe(false)
+    player.pauseHere()
+    await vi.advanceTimersByTimeAsync(1_000) // past the boundary, where B would have started
+    expect(audio.paused).toBe(true)
+    expect(spare.paused).toBe(true)
+    expect(blocked).toBe(1)
   })
 
   it('changes nothing when the server confirms the switch', async () => {
