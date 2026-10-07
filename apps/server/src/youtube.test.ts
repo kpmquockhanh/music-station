@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   VideoRejected,
@@ -8,6 +11,7 @@ import {
   parseInfo,
   parseSearchOutput,
   searchArgs,
+  transcodeArgs,
 } from './youtube'
 import type { RunFn } from './process'
 
@@ -30,21 +34,27 @@ describe('argument builders', () => {
     expect(infoArgs(ID)).toEqual(['--no-warnings', '--no-progress', '--dump-json', '--no-playlist', '--', URL_])
   })
 
-  it('download writes <id>.m4a via an %(ext)s template', () => {
+  it('download saves the source next to the destination and prints its path', () => {
     expect(downloadArgs(ID, '/data/cache/.tmp/x.m4a')).toEqual([
       '--no-warnings',
       '--no-progress',
       '--no-playlist',
       '-f',
       '140/bestaudio[ext=m4a]/bestaudio',
-      '-x',
-      '--audio-format',
-      'm4a',
+      '--print',
+      'after_move:filepath',
       '-o',
-      '/data/cache/.tmp/x.%(ext)s',
+      '/data/cache/.tmp/x.src.%(ext)s',
       '--',
       URL_,
     ])
+  })
+
+  it('transcode re-encodes to 64 kbps AAC with the index up front', () => {
+    const args = transcodeArgs('/tmp/x.src.webm', '/tmp/x.m4a')
+    expect(args.slice(args.indexOf('-i'), args.indexOf('-i') + 2)).toEqual(['-i', '/tmp/x.src.webm'])
+    expect(args.join(' ')).toContain('-c:a aac -b:a 64k -movflags +faststart')
+    expect(args.at(-1)).toBe('/tmp/x.m4a')
   })
 
   it('adds cookies before --', () => {
@@ -138,12 +148,47 @@ describe('createYouTube', () => {
     const yt = createYouTube({ bin: '/opt/yt-dlp/yt-dlp', maxDurationSec: 3_600 }, fake.run)
     await yt.search('lofi')
     await yt.getInfo(ID)
-    await yt.download(ID, '/tmp/a.m4a')
     expect(fake.calls.map((c) => [c.bin, c.timeoutMs])).toEqual([
       ['/opt/yt-dlp/yt-dlp', 15_000],
       ['/opt/yt-dlp/yt-dlp', 20_000],
-      ['/opt/yt-dlp/yt-dlp', 120_000],
     ])
+  })
+
+  it('downloads with yt-dlp, transcodes the printed file with ffmpeg, then deletes the source', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'yt-'))
+    const src = join(dir, 'a.src.webm')
+    writeFileSync(src, 'source')
+    const fake = fakeRun(`${src}\n`)
+    const yt = createYouTube({ bin: 'yt-dlp', ffmpegBin: '/usr/bin/ffmpeg', maxDurationSec: 3_600 }, fake.run)
+    await yt.download(ID, join(dir, 'a.m4a'))
+    expect(fake.calls.map((c) => [c.bin, c.timeoutMs])).toEqual([
+      ['yt-dlp', 120_000],
+      ['/usr/bin/ffmpeg', 180_000],
+    ])
+    expect(fake.calls[1]!.args).toEqual(transcodeArgs(src, join(dir, 'a.m4a')))
+    expect(existsSync(src)).toBe(false)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('deletes the source when transcoding fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'yt-'))
+    const src = join(dir, 'a.src.m4a')
+    writeFileSync(src, 'source')
+    const run: RunFn = async (bin) => {
+      if (bin === 'ffmpeg') throw new Error('Invalid data found when processing input')
+      return src
+    }
+    const yt = createYouTube({ bin: 'yt-dlp', maxDurationSec: 3_600 }, run)
+    await expect(yt.download(ID, join(dir, 'a.m4a'))).rejects.toThrow('Invalid data found when processing input')
+    expect(existsSync(src)).toBe(false)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('fails when yt-dlp prints no path', async () => {
+    const fake = fakeRun('')
+    const yt = createYouTube({ bin: 'yt-dlp', maxDurationSec: 3_600 }, fake.run)
+    await expect(yt.download(ID, '/tmp/a.m4a')).rejects.toThrow('did not say where')
+    expect(fake.calls).toHaveLength(1)
   })
 
   it('rejects an invalid id without spawning', async () => {

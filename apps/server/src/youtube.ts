@@ -1,3 +1,4 @@
+import { rm } from 'node:fs/promises'
 import { isVideoId, type SearchResult, type VideoInfo } from '@music-station/shared'
 import { runProcess, type RunFn } from './process'
 
@@ -5,6 +6,7 @@ export class VideoRejected extends Error {}
 
 export interface YouTubeOptions {
   bin: string
+  ffmpegBin?: string
   cookies?: string
   maxDurationSec: number
 }
@@ -19,7 +21,11 @@ export interface YouTube {
 const SEARCH_TIMEOUT_MS = 15_000
 const INFO_TIMEOUT_MS = 20_000
 const DOWNLOAD_TIMEOUT_MS = 120_000
+// About 45 s for a 60-minute song on a laptop; slower servers get the headroom.
+const TRANSCODE_TIMEOUT_MS = 180_000
 const UPDATE_TIMEOUT_MS = 60_000
+/** Small files download fast on weak connections, which matters more here than fidelity. */
+export const AUDIO_BITRATE = '64k'
 
 export const thumbnailUrl = (videoId: string) => `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`
 
@@ -40,21 +46,44 @@ export function infoArgs(videoId: string, cookies?: string): string[] {
   return [...common(cookies), '--dump-json', '--no-playlist', '--', watchUrl(videoId)]
 }
 
+/** Downloads the source audio as is, next to destPath, and prints where it landed. */
 export function downloadArgs(videoId: string, destPath: string, cookies?: string): string[] {
   if (!destPath.endsWith('.m4a')) throw new Error('destPath must end with .m4a')
-  const template = destPath.replace(/\.m4a$/, '.%(ext)s')
+  const template = destPath.replace(/\.m4a$/, '.src.%(ext)s')
   return [
     ...common(cookies),
     '--no-playlist',
     '-f',
     '140/bestaudio[ext=m4a]/bestaudio',
-    '-x',
-    '--audio-format',
-    'm4a',
+    '--print',
+    'after_move:filepath',
     '-o',
     template,
     '--',
     watchUrl(videoId),
+  ]
+}
+
+/** Re-encodes the source to AAC at AUDIO_BITRATE, with the index up front so playback can start early. */
+export function transcodeArgs(srcPath: string, destPath: string): string[] {
+  return [
+    '-nostdin',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-y',
+    '-i',
+    srcPath,
+    '-vn',
+    '-map_metadata',
+    '-1',
+    '-c:a',
+    'aac',
+    '-b:a',
+    AUDIO_BITRATE,
+    '-movflags',
+    '+faststart',
+    destPath,
   ]
 }
 
@@ -125,9 +154,9 @@ export function explainError(err: unknown): Error {
 }
 
 export function createYouTube(opts: YouTubeOptions, run: RunFn = runProcess): YouTube {
-  const call = async (args: string[], timeoutMs: number) => {
+  const call = async (args: string[], timeoutMs: number, bin = opts.bin) => {
     try {
-      return await run(opts.bin, args, timeoutMs)
+      return await run(bin, args, timeoutMs)
     } catch (err) {
       throw explainError(err)
     }
@@ -141,7 +170,14 @@ export function createYouTube(opts: YouTubeOptions, run: RunFn = runProcess): Yo
       return parseInfo(await call(args, INFO_TIMEOUT_MS), opts.maxDurationSec)
     },
     async download(videoId, destPath) {
-      await call(downloadArgs(videoId, destPath, opts.cookies), DOWNLOAD_TIMEOUT_MS)
+      const out = await call(downloadArgs(videoId, destPath, opts.cookies), DOWNLOAD_TIMEOUT_MS)
+      const src = out.trim().split('\n').at(-1)?.trim()
+      if (!src) throw new Error('yt-dlp did not say where it saved the audio')
+      try {
+        await call(transcodeArgs(src, destPath), TRANSCODE_TIMEOUT_MS, opts.ffmpegBin ?? 'ffmpeg')
+      } finally {
+        await rm(src, { force: true })
+      }
     },
     update() {
       return call(['-U'], UPDATE_TIMEOUT_MS)

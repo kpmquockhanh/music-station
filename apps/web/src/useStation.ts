@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { io, type Socket } from 'socket.io-client'
 import type { Ack, Activity, StationState } from '@music-station/shared'
 import { ClockSync } from './clockSync'
+import { downloadSong } from './download'
 import { SyncPlayer } from './player'
 import {
   clampDelay,
@@ -141,9 +142,7 @@ export function useStation(): Station {
       startLeadS: getStartLeadMs() / 1000,
       onStartLead: (s) => saveStartLeadMs(s * 1000),
       download: async (url, signal) => {
-        const res = await fetch(url, { signal })
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const blobUrl = URL.createObjectURL(await res.blob())
+        const blobUrl = URL.createObjectURL(await downloadSong(url, signal))
         return { url: blobUrl, release: () => URL.revokeObjectURL(blobUrl) }
       },
     })

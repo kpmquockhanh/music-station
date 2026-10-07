@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { basename } from 'node:path'
 
 export type RunFn = (bin: string, args: string[], timeoutMs: number) => Promise<string>
 
@@ -27,7 +28,7 @@ export const runProcess: RunFn = (bin, args, timeoutMs) =>
       }
       child.stdout.destroy()
       child.stderr.destroy()
-      settle(reject, new Error(`yt-dlp timed out after ${Math.round(timeoutMs / 1000)}s`))
+      settle(reject, new Error(`${basename(bin)} timed out after ${Math.round(timeoutMs / 1000)}s`))
     }, timeoutMs)
     child.on('error', (err) => {
       settle(reject, err)
