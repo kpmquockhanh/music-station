@@ -26,9 +26,23 @@ describe('targetPosition', () => {
 })
 
 describe('decideCorrection', () => {
-  it('does nothing inside the 30 ms deadband', () => {
-    expect(decideCorrection(10.02, 10)).toEqual({ rate: 1, seekTo: null })
-    expect(decideCorrection(9.98, 10)).toEqual({ rate: 1, seekTo: null })
+  it('creeps back at 0.2% inside the 30 ms deadband', () => {
+    expect(decideCorrection(10.02, 10)).toEqual({ rate: 0.998, seekTo: null })
+    expect(decideCorrection(9.98, 10)).toEqual({ rate: 1.002, seekTo: null })
+  })
+  it('keeps its direction within 10 ms of the target, so noise cannot flip it back and forth', () => {
+    expect(decideCorrection(10.005, 10, 0.998)).toEqual({ rate: 0.998, seekTo: null })
+    expect(decideCorrection(9.995, 10, 0.998)).toEqual({ rate: 0.998, seekTo: null })
+    expect(decideCorrection(10.005, 10, 1.002)).toEqual({ rate: 1.002, seekTo: null })
+    expect(decideCorrection(10.005, 10, 0.97)).toEqual({ rate: 0.998, seekTo: null })
+    expect(decideCorrection(10.005, 10, 1)).toEqual({ rate: 1.002, seekTo: null })
+  })
+  it('never returns a rate within 0.2% of 1, where browsers switch their time-stretcher and click', () => {
+    for (let drift = -1.5; drift <= 1.5; drift += 0.0005) {
+      for (const rate of [1, 0.94, 0.998, 1.002, 1.06]) {
+        expect(Math.abs(decideCorrection(10 + drift, 10, rate).rate - 1)).toBeGreaterThan(0.0019)
+      }
+    }
   })
   it('slows down in proportion when ahead by up to 1 s', () => {
     expect(decideCorrection(10.1, 10)).toEqual({ rate: 0.98, seekTo: null })
@@ -41,9 +55,9 @@ describe('decideCorrection', () => {
     expect(decideCorrection(9.5, 10)).toEqual({ rate: 1.06, seekTo: null })
     expect(decideCorrection(11, 10)).toEqual({ rate: 0.94, seekTo: null })
   })
-  it('jumps when more than 1 s off', () => {
-    expect(decideCorrection(11.5, 10)).toEqual({ rate: 1, seekTo: 10 })
-    expect(decideCorrection(5, 10)).toEqual({ rate: 1, seekTo: 10 })
+  it('jumps when more than 1 s off, resting at 0.2% in its current direction', () => {
+    expect(decideCorrection(11.5, 10)).toEqual({ rate: 1.002, seekTo: 10 })
+    expect(decideCorrection(5, 10, 0.97)).toEqual({ rate: 0.998, seekTo: 10 })
   })
 })
 

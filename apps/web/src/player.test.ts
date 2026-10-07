@@ -90,6 +90,13 @@ const item = (videoId: string, status: QueueItem['status'] = 'ready'): QueueItem
 const playing = (position: number, at: number): Playback => ({ status: 'playing', position, at })
 const paused = (position: number): Playback => ({ status: 'paused', position, at: T0 })
 const settle = () => vi.advanceTimersByTimeAsync(0)
+/** Reads the same position for a full drift-averaging window, so the player acts on it alone. */
+const holdAt = (t: number) => {
+  for (let i = 0; i < 8; i++) {
+    audio.currentTime = t
+    player.correct()
+  }
+}
 
 let audio: FakeAudio
 let delay: number
@@ -175,7 +182,7 @@ describe('SyncPlayer', () => {
     expect(audio.currentTime).toBe(30)
   })
 
-  it('nudges the rate for small drift and seeks for large drift', async () => {
+  it('nudges the rate for small drift, creeps near the target, and seeks for large drift', async () => {
     player.update(item(A), playing(0, T0 - 10_000)) // the target is 10 s while the clock stands still
     audio.loaded()
     await settle()
@@ -183,16 +190,46 @@ describe('SyncPlayer', () => {
     player.correct()
     expect(audio.playbackRate).toBe(0.98)
     expect(player.lastDrift).toBeCloseTo(0.1)
-    audio.currentTime = 9.9
-    player.correct()
+    holdAt(9.9)
     expect(audio.playbackRate).toBe(1.02)
-    audio.currentTime = 10.01
-    player.correct()
-    expect(audio.playbackRate).toBe(1)
+    holdAt(10.01)
+    expect(audio.playbackRate).toBe(1.002)
     audio.currentTime = 12
     player.correct()
     expect(audio.currentTime).toBe(10)
-    expect(audio.playbackRate).toBe(1)
+    expect(audio.playbackRate).toBe(1.002)
+  })
+
+  it('never sets the rate to exactly 1, where browsers switch their time-stretcher and click', async () => {
+    player.update(item(A), playing(0, T0 - 10_000))
+    audio.loaded()
+    await settle()
+    expect(audio.playbackRate).toBe(1.002)
+    audio.currentTime = 10.1
+    player.correct()
+    expect(audio.playbackRate).toBe(0.98)
+    holdAt(10)
+    expect(audio.playbackRate).toBe(0.998)
+    player.update(item(A), paused(10))
+    expect(audio.playbackRate).toBe(0.998)
+    player.update(item(A), playing(10, T0))
+    await settle()
+    expect(audio.paused).toBe(false)
+    expect(audio.playbackRate).toBe(0.998)
+  })
+
+  it('acts on the drift averaged over 2 s, since Firefox reports currentTime up to 40 ms off', async () => {
+    player.update(item(A), playing(0, T0 - 10_000))
+    audio.loaded()
+    await settle()
+    holdAt(10)
+    for (const t of [10.045, 9.965, 10.045, 9.965]) {
+      audio.currentTime = t // each reading alone is outside the deadband
+      player.correct()
+      expect(audio.playbackRate).toBe(1.002)
+    }
+    holdAt(10.1)
+    expect(audio.playbackRate).toBe(0.98)
   })
 
   it('runs the correction every 250 ms', async () => {
@@ -319,7 +356,7 @@ describe('SyncPlayer drift correction while buffering', () => {
     player.correct()
     expect(audio.seeks).toBe(1)
     expect(audio.currentTime).toBe(10)
-    expect(audio.playbackRate).toBe(1)
+    expect(audio.playbackRate).toBe(0.998)
   })
 
   it('learns how late its seeks land and aims ahead, so it stops seeking', async () => {
@@ -602,7 +639,63 @@ describe('SyncPlayer starting with a learned lead', () => {
     player.correct()
     player.correct()
     expect(audio.playbackRate).toBe(1.02)
-    expect(rateWrites).toBe(1) // start() found 1 already set, and the second correction wanted the same rate
+    expect(rateWrites).toBe(2) // start() set the creep rate, and the second correction wanted the same rate
+  })
+})
+
+describe('SyncPlayer on a device that loses time on every rate change', () => {
+  let rateWrites: number
+
+  beforeEach(() => {
+    player.destroy()
+    rateWrites = 0
+    const rated = audio as FakeAudio & { _rate?: number }
+    Object.defineProperty(rated, 'playbackRate', {
+      get: () => rated._rate ?? 1,
+      set: (v: number) => {
+        rated._rate = v
+        rateWrites++
+      },
+    })
+    player = new SyncPlayer({
+      audio,
+      serverNow: () => Date.now(),
+      delayMs: () => delay,
+      onBlocked: () => blocked++,
+      settleMs: 0,
+      fixedRate: true,
+    })
+  })
+
+  it('never writes the rate, through starts, drift, seeks and pauses', async () => {
+    player.update(item(A), playing(0, T0 - 10_000))
+    audio.loaded()
+    await settle()
+    holdAt(10.3)
+    holdAt(9.7)
+    player.update(item(A), paused(10))
+    player.update(item(A), playing(10, T0))
+    await settle()
+    expect(audio.paused).toBe(false)
+    expect(player.stats.seeks).toBeGreaterThan(0)
+    expect(rateWrites).toBe(0)
+    expect(player.stats.rateWrites).toBe(0)
+    expect(audio.playbackRate).toBe(1)
+  })
+
+  it('seeks once the drift averaged over 2 s passes 50 ms', async () => {
+    player.update(item(A), playing(0, T0 - 10_000)) // the target is 10 s while the clock stands still
+    audio.loaded()
+    await settle()
+    holdAt(10.04)
+    expect(player.stats.seeks).toBe(0)
+    audio.currentTime = 10.1
+    player.correct()
+    expect(player.stats.seeks).toBe(0) // one reading moves the average only to 47.5 ms
+    audio.currentTime = 10.5
+    player.correct()
+    expect(player.stats.seeks).toBe(1)
+    expect(audio.currentTime).toBe(10)
   })
 })
 

@@ -1,4 +1,12 @@
-import { decideCorrection, songEndsAt, targetPosition, type Playback, type QueueItem } from '@music-station/shared'
+import {
+  decideCorrection,
+  restRate,
+  SEEK_THRESHOLD_S,
+  songEndsAt,
+  targetPosition,
+  type Playback,
+  type QueueItem,
+} from '@music-station/shared'
 
 type AudioEvent = 'canplay' | 'loadedmetadata' | 'pause'
 
@@ -43,6 +51,11 @@ export interface PlayerDeps {
   startLeadS?: number
   /** Called when the start lead changes, so the device can remember it. */
   onStartLead?: (seconds: number) => void
+  /**
+   * This device loses playback time on every playbackRate change (iOS, about as long as play() takes to start),
+   * so it holds the rate at 1 and corrects drift only by seeking.
+   */
+  fixedRate?: boolean
 }
 
 const CORRECT_EVERY_MS = 250
@@ -57,6 +70,16 @@ const LANDING_SANE_S = 5
 const SETTLE_MS = 1_500
 /** Switch to the next song this long before its early start; the new deck then waits out the rest as a lead-in. */
 const HANDOFF_EARLY_MS = 500
+/**
+ * Corrections act on the drift averaged over this many readings (2 s). Firefox's currentTime runs ahead and
+ * snaps back by up to 40 ms about every second, which alone would push the drift in and out of the deadband.
+ */
+const DRIFT_WINDOW = 8
+/**
+ * With a fixed rate, a seek once the average drift passes this. iOS reads currentTime cleanly, so the margin only
+ * needs to cover how far a seek lands off its aim.
+ */
+const FIXED_RATE_SEEK_S = 0.05
 const HAVE_METADATA = 1
 const HAVE_FUTURE_DATA = 3
 
@@ -125,6 +148,8 @@ export class SyncPlayer {
   private retireTimer: ReturnType<typeof setTimeout> | null = null
   /** Server time before which the element is still settling from a seek or start. */
   private settleUntil = 0
+  /** Drift readings since the last seek or start, newest last, at most DRIFT_WINDOW. */
+  private drifts: number[] = []
   private readonly loop: ReturnType<typeof setInterval>
 
   constructor(deps: PlayerDeps) {
@@ -197,13 +222,17 @@ export class SyncPlayer {
       this.landing = null
       if (Math.abs(drift) < LANDING_SANE_S) this.learn(kind, drift)
     }
-    const { rate, seekTo } = decideCorrection(audio.currentTime, target)
-    if (seekTo !== null) {
-      audio.currentTime = seekTo + this.seekLead
-      this.landing = 'seek'
-      this.settle()
-      this.stats.seeks++
+    this.drifts.push(drift)
+    if (this.drifts.length > DRIFT_WINDOW) this.drifts.shift()
+    const average = this.drifts.reduce((a, b) => a + b, 0) / this.drifts.length
+    // A drift big enough to seek is real, and seeking at once beats waiting for the average to catch up.
+    const acted = Math.abs(drift) > SEEK_THRESHOLD_S ? drift : average
+    if (this.deps.fixedRate) {
+      if (Math.abs(acted) > FIXED_RATE_SEEK_S) this.seek(target)
+      return
     }
+    const { rate, seekTo } = decideCorrection(target + acted, target, audio.playbackRate)
+    if (seekTo !== null) this.seek(seekTo)
     this.setRate(rate)
   }
 
@@ -405,7 +434,7 @@ export class SyncPlayer {
     if (p.status !== 'playing') {
       this.stopRetiring()
       this.pauseAudio()
-      this.setRate(1)
+      this.setRate(this.restingRate())
       this.park(p.position)
       return
     }
@@ -433,7 +462,8 @@ export class SyncPlayer {
     const lead = audio.paused ? this.startLead : this.seekLead
     this.park(this.target() + lead)
     this.landing = audio.paused ? 'start' : 'seek'
-    this.setRate(1)
+    // A load resets the rate to 1, which only a fixed-rate device keeps; see MIN_RATE_CHANGE.
+    this.setRate(this.restingRate())
     this.settle()
     this.wantPlaying = true
     if (!audio.paused) return
@@ -491,7 +521,20 @@ export class SyncPlayer {
     if (Math.abs(audio.currentTime - position) > PARK_TOLERANCE_S) audio.currentTime = position
   }
 
-  /** iOS may restart its time-stretching on every write, so write only real changes. */
+  /** Aims a correction seek ahead by the learned lead, then waits for it to land. */
+  private seek(to: number): void {
+    this.active.audio.currentTime = to + this.seekLead
+    this.landing = 'seek'
+    this.settle()
+    this.stats.seeks++
+  }
+
+  /** The rate between corrections: 1 on a fixed-rate device, otherwise the creep in the current direction. */
+  private restingRate(): number {
+    return this.deps.fixedRate ? 1 : restRate(this.active.audio.playbackRate)
+  }
+
+  /** Browsers may restart their time-stretching on every write, so write only real changes. */
   private setRate(rate: number): void {
     if (this.active.audio.playbackRate === rate) return
     this.active.audio.playbackRate = rate
@@ -500,6 +543,7 @@ export class SyncPlayer {
 
   private settle(): void {
     this.settleUntil = this.deps.serverNow() + (this.deps.settleMs ?? SETTLE_MS)
+    this.drifts = [] // readings from before the jump say nothing about where it lands
   }
 
   private target(): number {

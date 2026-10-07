@@ -78,6 +78,15 @@ const JOIN_TIMEOUT_MS = 10_000
 /** A tab reloads itself for a new version at most this often, so a stale cache cannot make it loop. */
 const UPDATE_RELOAD_GUARD_MS = 60_000
 
+/**
+ * iOS loses about a quarter second of playback on every playbackRate change, so steering the rate makes it fall
+ * further behind. Every iOS browser runs WebKit, and an iPad reports itself as a Mac with a touch screen.
+ */
+function isIOS(): boolean {
+  const ua = navigator.userAgent
+  return /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)
+}
+
 /** The web build this page runs, named by its hashed main script; null in development. Compare webVersionOf(). */
 function pageVersion(): string | null {
   return document.querySelector('script[type="module"][src^="/assets/"]')?.getAttribute('src') ?? null
@@ -142,6 +151,7 @@ export function useStation(): Station {
       onSeekLead: (s) => saveSeekLeadMs(s * 1000),
       startLeadS: getStartLeadMs() / 1000,
       onStartLead: (s) => saveStartLeadMs(s * 1000),
+      fixedRate: isIOS(),
       download: async (url, signal) => {
         const blobUrl = URL.createObjectURL(await downloadSong(url, signal))
         return { url: blobUrl, release: () => URL.revokeObjectURL(blobUrl) }
