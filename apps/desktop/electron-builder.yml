@@ -1,0 +1,32 @@
+appId: site.devxdev.musicstation
+productName: Music Station
+directories:
+  output: release
+  buildResources: build
+# esbuild already bundled everything into dist/, so the app needs no node_modules.
+files:
+  - dist/**
+  - pages/**
+  - assets/**
+  - package.json
+npmRebuild: false
+mac:
+  target:
+    - target: dmg
+      arch: universal
+  category: public.app-category.music
+  icon: build/icon.png
+  # Ad-hoc signature: free, and enough for Apple Silicon to open the app after "Open Anyway".
+  identity: "-"
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  artifactName: Music-Station-${version}-mac.${ext}
+win:
+  target:
+    - target: nsis
+      arch: x64
+  icon: build/icon.png
+  artifactName: Music-Station-${version}-windows.${ext}
+nsis:
+  oneClick: true
+  perMachine: false
