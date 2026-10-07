@@ -83,6 +83,23 @@ The app log then shows `YouTube bot check hit`, and songs fail to add. Try these
 
 If a device shows **Tap to resume audio**, its browser blocked playback or the phone paused it. Tap the button once.
 
+## Desktop app
+
+Music Station also runs as an app on Mac and Windows. It opens the station in its own window, joins with your saved nickname, and keeps playing when you close the window. The menu bar (Mac) or tray (Windows) icon shows the song playing now and has **Pause for everyone**, **Play for everyone** and **Skip for everyone**.
+
+Download the latest installer from the [Releases page](https://github.com/kpmquockhanh/music-station/releases): `Music-Station-<version>-mac.dmg` or `Music-Station-<version>-windows.exe`. The apps are not signed, so the first launch takes one extra step:
+
+- **Mac:** open the `.dmg` and drag Music Station to Applications. Open it once; macOS refuses. Go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**.
+- **Windows:** run the `.exe`. When SmartScreen warns, click **More info → Run anyway**. It installs for your user only, without admin rights.
+
+The app opens `https://music.devxdev.site`. To use another station, choose **Change station…** in the menu bar or tray menu and type its address, such as `192.168.1.20:3000`.
+
+The keyboard media keys control this computer only. **Pause** stops the sound here while the station keeps playing for everyone else, and **Play** rejoins at the shared position. **Next**, like a headset's next button, skips the song for everyone.
+
+The app's screens update with every server deploy. A new installer is only needed for changes to the app itself.
+
+To publish installers, set `version` in `apps/desktop/package.json`, commit, and push a tag `desktop-v<version>`. GitHub Actions builds both installers and attaches them to a draft release. Publish the draft by hand.
+
 ## Development
 
 ```bash
@@ -100,6 +117,10 @@ Run the two `dev` commands in separate terminals and open http://localhost:5173.
 | Typecheck | `pnpm typecheck` |
 | Production build | `pnpm build` |
 | yt-dlp smoke check | `pnpm build && node apps/server/dist/smoke.js` |
+| Desktop app against the local UI | `STATION_URL=http://localhost:5173 pnpm --filter @music-station/desktop dev` |
+| Desktop installer (`.dmg` on a Mac) | `pnpm --filter @music-station/desktop dist` |
+
+Without `STATION_URL`, `dev` opens the saved station, which is `https://music.devxdev.site` by default.
 
 ## Known limits
 
