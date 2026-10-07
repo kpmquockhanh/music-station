@@ -21,11 +21,14 @@ export interface YouTube {
 const SEARCH_TIMEOUT_MS = 15_000
 const INFO_TIMEOUT_MS = 20_000
 const DOWNLOAD_TIMEOUT_MS = 120_000
-// About 45 s for a 60-minute song on a laptop; slower servers get the headroom.
+// Copying AAC takes a second; encoding a fallback source takes about 45 s for 60 minutes on a laptop.
 const TRANSCODE_TIMEOUT_MS = 180_000
 const UPDATE_TIMEOUT_MS = 60_000
-/** Small files download fast on weak connections, which matters more here than fidelity. */
-export const AUDIO_BITRATE = '64k'
+/**
+ * Only for sources that are not AAC already. ffmpeg's own AAC encoder adds audible clicks when it re-encodes
+ * lossy audio at low rates (thousands per song at 64k), so AAC sources are copied untouched instead.
+ */
+export const FALLBACK_BITRATE = '128k'
 
 export const thumbnailUrl = (videoId: string) => `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`
 
@@ -64,8 +67,12 @@ export function downloadArgs(videoId: string, destPath: string, cookies?: string
   ]
 }
 
-/** Re-encodes the source to AAC at AUDIO_BITRATE, with the index up front so playback can start early. */
+/**
+ * Writes the source as m4a with the index up front so playback can start early. YouTube's m4a audio is AAC and
+ * is copied as is; anything else (an opus fallback) is encoded to AAC at FALLBACK_BITRATE.
+ */
 export function transcodeArgs(srcPath: string, destPath: string): string[] {
+  const codec = srcPath.endsWith('.m4a') ? ['copy'] : ['aac', '-b:a', FALLBACK_BITRATE]
   return [
     '-nostdin',
     '-hide_banner',
@@ -78,9 +85,7 @@ export function transcodeArgs(srcPath: string, destPath: string): string[] {
     '-map_metadata',
     '-1',
     '-c:a',
-    'aac',
-    '-b:a',
-    AUDIO_BITRATE,
+    ...codec,
     '-movflags',
     '+faststart',
     destPath,

@@ -96,8 +96,8 @@ interface CachedFile {
 
 export class SyncPlayer {
   lastDrift: number | null = null
-  /** Counters for the sync log: correction seeks, and song changes made on a preloaded deck. */
-  readonly stats = { seeks: 0, handoffs: 0 }
+  /** Counters for the sync log: correction seeks, song changes made on a preloaded deck, and playbackRate writes. */
+  readonly stats = { seeks: 0, handoffs: 0, rateWrites: 0 }
   private readonly deps: PlayerDeps
   private readonly decks: Deck[]
   private active: Deck
@@ -493,7 +493,9 @@ export class SyncPlayer {
 
   /** iOS may restart its time-stretching on every write, so write only real changes. */
   private setRate(rate: number): void {
-    if (this.active.audio.playbackRate !== rate) this.active.audio.playbackRate = rate
+    if (this.active.audio.playbackRate === rate) return
+    this.active.audio.playbackRate = rate
+    this.stats.rateWrites++
   }
 
   private settle(): void {

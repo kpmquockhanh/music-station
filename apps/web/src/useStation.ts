@@ -209,6 +209,7 @@ export function useStation(): Station {
         source: player.source,
         downloadMs: player.downloadMs,
         seeks: player.stats.seeks,
+        rateWrites: player.stats.rateWrites,
         handoffs: player.stats.handoffs,
         nextReady: player.nextReady,
         leadMs: Math.round(player.leadS * 1000),

@@ -50,11 +50,16 @@ describe('argument builders', () => {
     ])
   })
 
-  it('transcode re-encodes to 64 kbps AAC with the index up front', () => {
-    const args = transcodeArgs('/tmp/x.src.webm', '/tmp/x.m4a')
-    expect(args.slice(args.indexOf('-i'), args.indexOf('-i') + 2)).toEqual(['-i', '/tmp/x.src.webm'])
-    expect(args.join(' ')).toContain('-c:a aac -b:a 64k -movflags +faststart')
+  it('transcode copies AAC sources untouched, with the index up front', () => {
+    const args = transcodeArgs('/tmp/x.src.m4a', '/tmp/x.m4a')
+    expect(args.slice(args.indexOf('-i'), args.indexOf('-i') + 2)).toEqual(['-i', '/tmp/x.src.m4a'])
+    expect(args.join(' ')).toContain('-c:a copy -movflags +faststart')
+    expect(args).not.toContain('-b:a')
     expect(args.at(-1)).toBe('/tmp/x.m4a')
+  })
+
+  it('transcode encodes other sources to 128 kbps AAC', () => {
+    expect(transcodeArgs('/tmp/x.src.webm', '/tmp/x.m4a').join(' ')).toContain('-c:a aac -b:a 128k -movflags')
   })
 
   it('adds cookies before --', () => {
