@@ -7,6 +7,8 @@ import { Queue } from './screens/Queue'
 import { Search } from './screens/Search'
 import { Settings } from './screens/Settings'
 import { Toasts } from './screens/Toasts'
+import { useDesktopBridge } from './desktop'
+import { useMediaSession } from './mediaSession'
 import { Avatar, Icon, IconButton, Logo, type IconName } from './ui'
 import { useStation } from './useStation'
 
@@ -14,6 +16,8 @@ type Tab = 'queue' | 'listeners'
 
 export function App() {
   const station = useStation()
+  useMediaSession(station)
+  useDesktopBridge(station)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [tab, setTab] = useState<Tab>('queue')
   const { state } = station
@@ -21,7 +25,11 @@ export function App() {
   if (!station.joined || !state) {
     return (
       <>
-        <Join connected={station.connected} onJoin={station.join} />
+        {station.autoJoining ? (
+          <Joining connected={station.connected} />
+        ) : (
+          <Join connected={station.connected} onJoin={station.join} />
+        )}
         <Toasts toasts={station.toasts} />
       </>
     )
@@ -101,6 +109,18 @@ export function App() {
       )}
       <Toasts toasts={station.toasts} />
     </div>
+  )
+}
+
+/** Shown instead of the Join screen while the app, or a tab that just updated, joins with the saved nickname. */
+function Joining({ connected }: { connected: boolean }) {
+  return (
+    <main className="grid min-h-dvh place-items-center px-6">
+      <p role="status" className="flex items-center gap-2 text-muted">
+        <Icon name="spinner" />
+        {connected ? 'Joining the station…' : 'Connecting to station…'}
+      </p>
+    </main>
   )
 }
 

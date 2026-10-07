@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { io, type Socket } from 'socket.io-client'
 import type { Ack, Activity, StationState } from '@music-station/shared'
 import { ClockSync } from './clockSync'
+import { getDesktop } from './desktop'
 import { downloadSong } from './download'
 import { SyncPlayer } from './player'
 import {
@@ -17,6 +18,7 @@ import {
   saveSeekLeadMs,
   saveStartLeadMs,
   saveUpdateReload,
+  type UpdateReload,
 } from './storage'
 
 export type ActionEvent =
@@ -46,6 +48,8 @@ export interface Station {
   state: StationState | null
   connected: boolean
   joined: boolean
+  /** Joining on its own with the saved nickname; the Join screen waits until this ends. */
+  autoJoining: boolean
   blocked: boolean
   toasts: Toast[]
   delayMs: number
@@ -94,10 +98,18 @@ function pageVersion(): string | null {
   return document.querySelector('script[type="module"][src^="/assets/"]')?.getAttribute('src') ?? null
 }
 
-/** The nickname to rejoin with when this tab, joined, just reloaded itself for a new version, else ''. */
-function rejoinAfterUpdate(): string {
-  const r = getUpdateReload()
-  return r.rejoin && Date.now() - r.at < UPDATE_RELOAD_GUARD_MS ? getNickname() : ''
+/**
+ * Who to join as when the page opens, skipping the Join screen: a tab that reloaded itself for a new version while
+ * joined, and the desktop app at every start once a nickname is saved. `updated` asks for the update toast.
+ */
+export function startupJoin(
+  reload: UpdateReload,
+  nickname: string,
+  inApp: boolean,
+  now: number,
+): { nickname: string; updated: boolean } {
+  const updated = reload.rejoin && now - reload.at < UPDATE_RELOAD_GUARD_MS
+  return nickname && (updated || inApp) ? { nickname, updated } : { nickname: '', updated: false }
 }
 const ACTION_TIMEOUT_MS = 30_000
 
@@ -285,17 +297,20 @@ export function useStation(): Station {
     [clientId],
   )
 
-  // After reloading itself for a new version, the tab rejoins on its own. Without a tap the browser may
-  // block the sound; the player then shows the "Tap to resume audio" banner, which unlocks it.
-  const pendingRejoin = useRef(rejoinAfterUpdate())
+  // A tab that reloaded itself for a new version rejoins on its own, and so does the desktop app at every start.
+  // Without a tap a browser may block the sound; the player then shows the "Tap to resume audio" banner.
+  const [startup] = useState(() => startupJoin(getUpdateReload(), getNickname(), getDesktop() !== null, Date.now()))
+  const [autoJoining, setAutoJoining] = useState(startup.nickname !== '')
+  const startupTried = useRef(false)
   useEffect(() => {
-    const nickname = pendingRejoin.current
-    if (!connected || joined || !nickname) return
-    pendingRejoin.current = ''
-    void join(nickname).then((res) => {
-      if (res.ok) notify('Updated to the latest version')
+    if (!connected || joined || !startup.nickname || startupTried.current) return
+    startupTried.current = true
+    void join(startup.nickname).then((res) => {
+      setAutoJoining(false)
+      if (!res.ok) notify(`Could not join the station: ${res.error}`, 'error')
+      else if (startup.updated) notify('Updated to the latest version')
     })
-  }, [connected, joined, join, notify])
+  }, [connected, joined, join, notify, startup])
 
   const send = useCallback(
     async (event: ActionEvent, payload: object = {}): Promise<Ack> => {
@@ -339,6 +354,7 @@ export function useStation(): Station {
     state,
     connected,
     joined,
+    autoJoining,
     blocked,
     toasts,
     delayMs,
