@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isLocalPage, navigationFor } from './navigation'
+import { isLocalPage, navigationFor, offlineAfterRendererGone } from './navigation'
 
 const STATION = 'https://music.devxdev.site'
 
@@ -61,5 +61,23 @@ describe('isLocalPage', () => {
     '',
   ])('rejects %j', (url) => {
     expect(isLocalPage(url)).toBe(false)
+  })
+})
+
+describe('offlineAfterRendererGone', () => {
+  // Electron's render-process-gone reasons. 'memory-eviction' is Chromium discarding a hidden page to save memory.
+  it.each(['crashed', 'killed', 'oom', 'abnormal-exit', 'launch-failed', 'integrity-failure', 'memory-eviction'])(
+    'shows the offline page after %s, so the music comes back',
+    (reason) => {
+      expect(offlineAfterRendererGone(reason, false)).toBe(true)
+    },
+  )
+
+  it('leaves a clean exit alone', () => {
+    expect(offlineAfterRendererGone('clean-exit', false)).toBe(false)
+  })
+
+  it('does nothing while the app quits', () => {
+    expect(offlineAfterRendererGone('killed', true)).toBe(false)
   })
 })

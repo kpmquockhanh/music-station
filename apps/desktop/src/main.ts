@@ -15,7 +15,7 @@ import {
   type MenuItemConstructorOptions,
   type WebPreferences,
 } from 'electron'
-import { isLocalPage, navigationFor } from './navigation'
+import { isLocalPage, navigationFor, offlineAfterRendererGone } from './navigation'
 import { loadStation, normaliseStation, saveStation } from './settings'
 import { escapeMnemonic, parseNowPlaying, trayMenu, type TrayCommand } from './trayMenu'
 
@@ -107,6 +107,11 @@ function createWindow(): void {
     setTray(null) // the new page reports its song once it joins
     // Cloudflare answers 502 or 530 while the station's computer is off.
     if (httpCode >= 500 && !isLocalPage(url)) showOffline()
+  })
+  contents.on('render-process-gone', (_event, details) => {
+    if (!offlineAfterRendererGone(details.reason, quitting) || !win || win.isDestroyed()) return
+    setTray(null)
+    showOffline()
   })
   win.on('close', (event) => {
     if (quitting) return

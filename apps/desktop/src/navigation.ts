@@ -23,3 +23,12 @@ export function isLocalPage(url: string): boolean {
     return false
   }
 }
+
+/**
+ * Whether a renderer that has gone should give way to the offline page, whose retry brings the station back. A clean
+ * exit is the window closing; any other reason (a crash, a kill, or Chromium discarding a hidden page to save memory)
+ * would otherwise leave a blank window and silence.
+ */
+export function offlineAfterRendererGone(reason: string, quitting: boolean): boolean {
+  return !quitting && reason !== 'clean-exit'
+}
