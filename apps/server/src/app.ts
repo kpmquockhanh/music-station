@@ -14,7 +14,7 @@ import type { YouTube } from './youtube'
 
 export interface AppDeps {
   config: Config
-  youtube: Pick<YouTube, 'search' | 'getInfo' | 'download'>
+  youtube: Pick<YouTube, 'search' | 'getInfo' | 'related' | 'download'>
   now?: () => number
   log?: (msg: string) => void
   graceMs?: number
@@ -49,6 +49,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
     station: new Station(),
     cache,
     getInfo: youtube.getInfo,
+    related: youtube.related,
     now,
     onChange: () => {
       realtime?.broadcastState()

@@ -1,6 +1,14 @@
 import { randomUUID } from 'node:crypto'
+import { LRUCache } from 'lru-cache'
 import pLimit from 'p-limit'
-import { parseVideoInput, type QueueItem, type StationState, type VideoInfo } from '@music-station/shared'
+import {
+  AUTOPLAY_NAME,
+  parseVideoInput,
+  type QueueItem,
+  type SearchResult,
+  type StationState,
+  type VideoInfo,
+} from '@music-station/shared'
 import type { Persisted } from './persist'
 import { Station, StationError } from './station'
 
@@ -15,11 +23,18 @@ export interface ServiceDeps {
   station: Station
   cache: CacheLike
   getInfo(videoId: string): Promise<VideoInfo>
+  /** Songs similar to this one, for autoplay. */
+  related(videoId: string): Promise<SearchResult[]>
   now(): number
   onChange(): void
   onActivity(text: string): void
   log?(msg: string): void
 }
+
+/** After autoplay finds nothing, or YouTube fails, it waits this long before it tries again. */
+export const AUTOPLAY_RETRY_MS = 60_000
+/** Candidates autoplay looks up before it gives up until the retry; each lookup spawns yt-dlp. */
+const AUTOPLAY_TRIES = 3
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
@@ -34,6 +49,9 @@ export class StationService {
   // Each lookup spawns yt-dlp, so cap them and share one per video.
   private infoLimit = pLimit(2)
   private lookups = new Map<string, Promise<VideoInfo>>()
+  private suggesting = false
+  private suggestRetryAt = Number.NEGATIVE_INFINITY
+  private relatedCache = new LRUCache<string, SearchResult[]>({ max: 20, ttl: 3_600_000 })
 
   constructor(private deps: ServiceDeps) {}
 
@@ -82,21 +100,14 @@ export class StationService {
     } catch (err) {
       throw new StationError(message(err))
     }
-    const item: QueueItem = {
-      id: randomUUID(),
-      videoId,
-      title: info.title,
-      channel: info.channel,
-      duration: info.duration,
-      thumbnail: info.thumbnail,
-      addedBy: nickname,
-      status: this.deps.cache.has(videoId) ? 'ready' : 'downloading',
-    }
-    this.deps.station.add(item, this.deps.now())
-    this.deps.onActivity(`${nickname} added ${item.title}`)
-    this.changed()
-    if (item.status === 'downloading') this.startDownload(videoId)
-    return item
+    return this.enqueue(info, nickname)
+  }
+
+  setAutoplay(listenerId: string, enabled: boolean): void {
+    const nickname = this.who(listenerId)
+    if (!this.deps.station.setAutoplay(enabled)) return
+    this.suggestRetryAt = Number.NEGATIVE_INFINITY // turning it on again is how people ask for a retry
+    this.announce(`${nickname} turned autoplay ${enabled ? 'on' : 'off'}`)
   }
 
   remove(listenerId: string, itemId: string): void {
@@ -137,6 +148,7 @@ export class StationService {
 
   tick(): void {
     if (this.deps.station.tick(this.deps.now())) this.changed()
+    else this.maybeSuggest() // retries after a failure, which no state change announces
   }
 
   private who(listenerId: string): string {
@@ -148,6 +160,69 @@ export class StationService {
   private announce(text: string): void {
     this.deps.onActivity(text)
     this.changed()
+  }
+
+  private enqueue(info: VideoInfo, addedBy: string): QueueItem {
+    const item: QueueItem = {
+      id: randomUUID(),
+      videoId: info.videoId,
+      title: info.title,
+      channel: info.channel,
+      duration: info.duration,
+      thumbnail: info.thumbnail,
+      addedBy,
+      status: this.deps.cache.has(info.videoId) ? 'ready' : 'downloading',
+    }
+    this.deps.station.add(item, this.deps.now())
+    this.deps.onActivity(`${addedBy} added ${item.title}`)
+    this.changed()
+    if (item.status === 'downloading') this.startDownload(info.videoId)
+    return item
+  }
+
+  /** Queues a song similar to the current one when autoplay is on and nothing else is left to play. */
+  private maybeSuggest(): void {
+    if (this.suggesting || this.deps.now() < this.suggestRetryAt) return
+    const seed = this.deps.station.autoplaySeed()
+    if (!seed) return
+    this.suggesting = true
+    const log = this.deps.log ?? console.log
+    void this.suggest(seed)
+      .catch((err) => {
+        log(`Autoplay could not add a song: ${message(err)}`)
+        this.suggestRetryAt = this.deps.now() + AUTOPLAY_RETRY_MS
+      })
+      .finally(() => {
+        this.suggesting = false
+      })
+  }
+
+  private async suggest(seed: string): Promise<void> {
+    const { station } = this.deps
+    let related = this.relatedCache.get(seed)
+    if (!related) {
+      related = await this.deps.related(seed)
+      this.relatedCache.set(seed, related)
+    }
+    let tries = 0
+    let lastError: unknown = new Error('YouTube suggested no new songs')
+    for (const candidate of related) {
+      // Checked before each pick, since people can add songs or turn autoplay off meanwhile.
+      if (!station.autoplaySeed()) return
+      if (station.recentVideoIds().has(candidate.videoId)) continue
+      if (tries++ === AUTOPLAY_TRIES) break
+      let info: VideoInfo
+      try {
+        info = await this.lookup(candidate.videoId)
+      } catch (err) {
+        lastError = err // too long, a livestream, or YouTube failing
+        continue
+      }
+      if (!station.autoplaySeed()) return
+      this.enqueue(info, AUTOPLAY_NAME) // throws when the queue is full of failed songs; retried later
+      return
+    }
+    throw lastError
   }
 
   private lookup(videoId: string): Promise<VideoInfo> {
@@ -200,5 +275,6 @@ export class StationService {
     }
     this.lastCurrentId = current?.id ?? null
     this.deps.onChange()
+    this.maybeSuggest()
   }
 }

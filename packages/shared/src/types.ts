@@ -1,6 +1,8 @@
 export const START_LEAD_MS = 1000
 export const MAX_QUEUE = 200
 export const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/
+/** The addedBy of songs that autoplay queued. */
+export const AUTOPLAY_NAME = 'Autoplay'
 
 export type QueueItemStatus = 'downloading' | 'ready' | 'failed'
 
@@ -31,6 +33,8 @@ export interface StationState {
   queue: QueueItem[] // upcoming, in order
   playback: Playback
   listeners: Listener[]
+  /** When the queue runs out, the server adds a song similar to the one playing. */
+  autoplay: boolean
 }
 
 export interface SearchResult {

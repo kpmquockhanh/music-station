@@ -12,11 +12,16 @@ export class StationError extends Error {}
 
 /** A tick later than this after a song's end (the host slept) starts the next song fresh, not mid-song. */
 const MAX_LATE_HANDOFF_MS = 2_000
+/** Autoplay does not pick a song that is among the last this many to play. */
+export const HISTORY_SIZE = 50
 
 export interface StationSnapshot {
   current: QueueItem | null
   queue: QueueItem[]
   playback: Playback
+  autoplay: boolean
+  /** Video ids that played most recently, oldest first. */
+  history: string[]
 }
 
 const idle = (): Playback => ({ status: 'paused', position: 0, at: 0 })
@@ -26,6 +31,8 @@ export class Station {
   private queue: QueueItem[] = []
   private playback: Playback = idle()
   private listeners = new Map<string, string>()
+  private autoplay = false
+  private history: string[] = []
 
   join(listenerId: string, nickname: string): void {
     this.listeners.set(listenerId, nickname)
@@ -59,6 +66,26 @@ export class Station {
     const to = Math.max(0, Math.min(toIndex, this.queue.length))
     this.queue.splice(to, 0, item!)
     return item!
+  }
+
+  /** Returns false when autoplay was already set that way. */
+  setAutoplay(enabled: boolean): boolean {
+    if (this.autoplay === enabled) return false
+    this.autoplay = enabled
+    return true
+  }
+
+  /** The song autoplay should find a similar one for, or null when autoplay has nothing to do. */
+  autoplaySeed(): string | null {
+    if (!this.autoplay || this.queue.some((q) => q.status !== 'failed')) return null
+    return this.current?.videoId ?? this.history.at(-1) ?? null
+  }
+
+  /** Songs autoplay must not pick: those queued, playing, or played recently. */
+  recentVideoIds(): Set<string> {
+    const ids = this.protectedIds()
+    for (const id of this.history) ids.add(id)
+    return ids
   }
 
   play(now: number): void {
@@ -128,14 +155,24 @@ export class Station {
   }
 
   snapshot(): StationState {
+    const { current, queue, playback, autoplay } = this.persisted()
     return {
-      ...this.persisted(),
+      current,
+      queue,
+      playback,
       listeners: [...this.listeners].map(([id, nickname]) => ({ id, nickname })),
+      autoplay,
     }
   }
 
   persisted(): StationSnapshot {
-    return structuredClone({ current: this.current, queue: this.queue, playback: this.playback })
+    return structuredClone({
+      current: this.current,
+      queue: this.queue,
+      playback: this.playback,
+      autoplay: this.autoplay,
+      history: this.history,
+    })
   }
 
   restore(saved: StationSnapshot, savedAt: number, now: number, isCached: (videoId: string) => boolean): void {
@@ -146,6 +183,8 @@ export class Station {
     const reached = expectedPosition(saved.playback, savedAt)
     const position = this.current ? Math.min(Math.max(0, reached), this.current.duration) : 0
     this.playback = { status: 'paused', position, at: now }
+    this.autoplay = saved.autoplay
+    this.history = saved.history.slice(-HISTORY_SIZE)
   }
 
   protectedIds(): Set<string> {
@@ -171,6 +210,7 @@ export class Station {
 
   private setCurrent(item: QueueItem, now: number, at = now + START_LEAD_MS): void {
     this.current = item
+    this.history = [...this.history.filter((id) => id !== item.videoId), item.videoId].slice(-HISTORY_SIZE)
     this.playback =
       item.status === 'ready'
         ? { status: 'playing', position: 0, at }

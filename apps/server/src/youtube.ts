@@ -14,12 +14,16 @@ export interface YouTubeOptions {
 export interface YouTube {
   search(query: string): Promise<SearchResult[]>
   getInfo(videoId: string): Promise<VideoInfo>
+  /** Songs similar to this one, from YouTube's Mix for it. The first is usually the song itself. */
+  related(videoId: string): Promise<SearchResult[]>
   download(videoId: string, destPath: string): Promise<void>
   update(): Promise<string>
 }
 
 const SEARCH_TIMEOUT_MS = 15_000
 const INFO_TIMEOUT_MS = 20_000
+const RELATED_TIMEOUT_MS = 20_000
+const RELATED_COUNT = 25
 const DOWNLOAD_TIMEOUT_MS = 120_000
 // Copying AAC takes a second; encoding a fallback source takes about 45 s for 60 minutes on a laptop.
 const TRANSCODE_TIMEOUT_MS = 180_000
@@ -43,6 +47,11 @@ function common(cookies?: string): string[] {
 
 export function searchArgs(query: string, cookies?: string): string[] {
   return [...common(cookies), '--flat-playlist', '--dump-json', '--', `ytsearch10:${query}`]
+}
+
+export function relatedArgs(videoId: string, cookies?: string): string[] {
+  const url = `${watchUrl(videoId)}&list=RD${videoId}`
+  return [...common(cookies), '--flat-playlist', '--dump-json', '--playlist-end', String(RELATED_COUNT), '--', url]
 }
 
 export function infoArgs(videoId: string, cookies?: string): string[] {
@@ -173,6 +182,10 @@ export function createYouTube(opts: YouTubeOptions, run: RunFn = runProcess): Yo
     async getInfo(videoId) {
       const args = infoArgs(videoId, opts.cookies) // throws VideoRejected before spawning
       return parseInfo(await call(args, INFO_TIMEOUT_MS), opts.maxDurationSec)
+    },
+    async related(videoId) {
+      const args = relatedArgs(videoId, opts.cookies) // throws VideoRejected before spawning
+      return parseSearchOutput(await call(args, RELATED_TIMEOUT_MS))
     },
     async download(videoId, destPath) {
       const out = await call(downloadArgs(videoId, destPath, opts.cookies), DOWNLOAD_TIMEOUT_MS)

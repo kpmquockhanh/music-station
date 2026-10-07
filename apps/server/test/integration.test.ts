@@ -31,6 +31,7 @@ const config = (): Config => ({
 
 const youtube = {
   search: async () => [],
+  related: async () => [],
   getInfo: async (videoId: string): Promise<VideoInfo> => ({
     videoId,
     title: 'Tone',
@@ -131,6 +132,28 @@ describe('music station server', () => {
     const res = await fetch(`${url}/audio/${ID}.m4a`, { headers: { Range: 'bytes=0-99' } })
     expect(res.status).toBe(206)
     expect((await res.arrayBuffer()).byteLength).toBe(100)
+  })
+
+  it('autoplay queues a similar song and remembers the setting across restarts', async () => {
+    const NEXT = 'znDgBy2mHbc'
+    await app!.close()
+    const related = async (videoId: string) =>
+      [videoId, NEXT].map((id) => ({ videoId: id, title: id, channel: '', duration: 100, thumbnail: '' }))
+    await start({ saveDelayMs: 60_000, youtube: { ...youtube, related } })
+    const a = client()
+    await send(a, 'join', { clientId: randomUUID(), nickname: 'Minh' })
+    const ready = waitFor<StationState>(a, 'state', playingReady)
+    await send(a, 'queue:add', { input: ID })
+    await ready
+
+    const suggested = waitFor<StationState>(a, 'state', (st) => st.queue.length === 1)
+    clock += 600
+    expect(await send(a, 'station:autoplay', { enabled: true })).toEqual({ ok: true })
+    expect((await suggested).queue[0]).toMatchObject({ videoId: NEXT, addedBy: 'Autoplay' })
+
+    await app!.close() // saves
+    expect(await loadState(join(dataDir, 'station.json'))).toMatchObject({ autoplay: true, history: [ID] })
+    app = undefined
   })
 
   it('answers time pings with the server clock', async () => {

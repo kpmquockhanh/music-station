@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { MAX_QUEUE, type VideoInfo } from '@music-station/shared'
+import { MAX_QUEUE, type SearchResult, type VideoInfo } from '@music-station/shared'
 import { Station, StationError } from './station'
-import { StationService, type CacheLike } from './service'
+import { AUTOPLAY_RETRY_MS, StationService, type CacheLike } from './service'
 import type { Persisted } from './persist'
 
 const A = 'aaaaaaaaaaa'
@@ -12,7 +12,13 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function setup(opts: { cached?: string[]; getInfo?: (id: string) => Promise<VideoInfo> } = {}) {
+function setup(
+  opts: {
+    cached?: string[]
+    getInfo?: (id: string) => Promise<VideoInfo>
+    related?: (id: string) => Promise<SearchResult[]>
+  } = {},
+) {
   const files = new Set(opts.cached ?? [])
   const pending: { id: string; resolve: () => void; reject: (e: Error) => void }[] = []
   const cache = {
@@ -47,11 +53,13 @@ function setup(opts: { cached?: string[]; getInfo?: (id: string) => Promise<Vide
         thumbnail: 't',
       })),
   )
+  const related = vi.fn(opts.related ?? (async (): Promise<SearchResult[]> => []))
   const station = new Station()
   const service = new StationService({
     station,
     cache,
     getInfo,
+    related,
     now: () => t,
     onChange,
     onActivity: (text) => activity.push(text),
@@ -59,7 +67,19 @@ function setup(opts: { cached?: string[]; getInfo?: (id: string) => Promise<Vide
   })
   service.join('l1', 'Minh')
   activity.length = 0
-  return { service, station, cache, pending, files, activity, logs, onChange, getInfo, setTime: (v: number) => (t = v) }
+  return {
+    service,
+    station,
+    cache,
+    pending,
+    files,
+    activity,
+    logs,
+    onChange,
+    getInfo,
+    related,
+    setTime: (v: number) => (t = v),
+  }
 }
 
 const info = (id: string): VideoInfo => ({ videoId: id, title: `Song ${id}`, channel: 'Ch', duration: 100, thumbnail: 't' })
@@ -347,6 +367,8 @@ describe('restore and tick', () => {
         },
       ],
       playback: { status: 'playing', position: 0, at: 0 },
+      autoplay: false,
+      history: [],
     }
     s.service.restore(saved)
     expect(s.cache.ensure).toHaveBeenCalledTimes(1)
@@ -380,5 +402,117 @@ describe('restore and tick', () => {
     s.setTime(1_234)
     expect(s.service.persisted()).toMatchObject({ version: 1, savedAt: 1_234 })
     expect(s.service.isPlaying()).toBe(true)
+  })
+})
+
+describe('autoplay', () => {
+  const C = 'ccccccccccc'
+  const result = (id: string): SearchResult => ({ videoId: id, title: `Song ${id}`, channel: 'Ch', duration: 100, thumbnail: 't' })
+  const settle = async () => {
+    for (let i = 0; i < 10; i++) await flush()
+  }
+  const queued = (s: ReturnType<typeof setup>) => s.service.state().queue.map((q) => [q.videoId, q.addedBy])
+
+  it('adds a similar song when the queue runs out', async () => {
+    const s = setup({ cached: [A], related: async () => [result(A), result(B)] })
+    await s.service.add('l1', A)
+    await settle()
+    expect(s.related).not.toHaveBeenCalled()
+
+    s.service.setAutoplay('l1', true)
+    await settle()
+    expect(s.related).toHaveBeenCalledWith(A)
+    expect(queued(s)).toEqual([[B, 'Autoplay']])
+    expect(s.service.state().autoplay).toBe(true)
+    expect(s.activity).toEqual(['Minh added Song A', 'Minh turned autoplay on', 'Autoplay added Song B'])
+    expect(s.cache.ensure).toHaveBeenCalledWith(B)
+  })
+
+  it('announces only real changes', () => {
+    const s = setup()
+    s.service.setAutoplay('l1', false)
+    s.service.setAutoplay('l1', true)
+    s.service.setAutoplay('l1', true)
+    s.service.setAutoplay('l1', false)
+    expect(s.activity).toEqual(['Minh turned autoplay on', 'Minh turned autoplay off'])
+  })
+
+  it('waits while songs are queued', async () => {
+    const s = setup({ cached: [A, B], related: async () => [result(C)] })
+    await s.service.add('l1', A)
+    await s.service.add('l1', B)
+    s.service.setAutoplay('l1', true)
+    await settle()
+    expect(s.related).not.toHaveBeenCalled()
+  })
+
+  it('skips songs that are playing or played recently', async () => {
+    const s = setup({ cached: [A, C], related: async () => [result(C), result(A), result(B)] })
+    await s.service.add('l1', A)
+    await s.service.add('l1', C)
+    s.service.skip('l1') // C plays, A played
+    s.service.setAutoplay('l1', true)
+    await settle()
+    expect(s.related).toHaveBeenCalledWith(C)
+    expect(queued(s)).toEqual([[B, 'Autoplay']])
+  })
+
+  it('tries the next song when YouTube rejects one', async () => {
+    const s = setup({
+      cached: [A],
+      related: async () => [result(B), result(C)],
+      getInfo: async (id) => {
+        if (id === B) throw new Error('Videos longer than 60 minutes are not supported')
+        return info(id)
+      },
+    })
+    await s.service.add('l1', A)
+    s.service.setAutoplay('l1', true)
+    await settle()
+    expect(queued(s)).toEqual([[C, 'Autoplay']])
+  })
+
+  it('starts the station again from the last song when it went idle', async () => {
+    const s = setup({ cached: [A, B], related: async () => [result(B)] })
+    await s.service.add('l1', A)
+    s.service.skip('l1')
+    expect(s.service.state().current).toBeNull()
+    s.service.setAutoplay('l1', true)
+    await settle()
+    expect(s.service.state().current).toMatchObject({ videoId: B, addedBy: 'Autoplay' })
+    expect(s.service.state().playback.status).toBe('playing')
+  })
+
+  it('adds nothing when someone queues a song during the lookup', async () => {
+    let release!: (r: SearchResult[]) => void
+    const s = setup({ cached: [A, C], related: () => new Promise((r) => (release = r)) })
+    await s.service.add('l1', A)
+    s.service.setAutoplay('l1', true)
+    await settle()
+    await s.service.add('l1', C)
+    release([result(B)])
+    await settle()
+    expect(queued(s)).toEqual([[C, 'Minh']])
+  })
+
+  it('waits a minute before retrying after YouTube fails', async () => {
+    const s = setup({
+      cached: [A],
+      related: async () => {
+        throw new Error('YouTube bot check hit')
+      },
+    })
+    await s.service.add('l1', A)
+    s.service.setAutoplay('l1', true)
+    await settle()
+    expect(s.logs).toContain('Autoplay could not add a song: YouTube bot check hit')
+    s.setTime(AUTOPLAY_RETRY_MS - 1)
+    s.service.tick()
+    await settle()
+    expect(s.related).toHaveBeenCalledOnce()
+    s.setTime(AUTOPLAY_RETRY_MS)
+    s.service.tick()
+    await settle()
+    expect(s.related).toHaveBeenCalledTimes(2)
   })
 })

@@ -30,6 +30,9 @@ const persistedSchema = z.object({
     position: z.number().min(0),
     at: z.number(),
   }),
+  // Files saved before autoplay existed have neither.
+  autoplay: z.boolean().default(false),
+  history: z.array(z.string().regex(VIDEO_ID_RE)).default([]),
 })
 
 export async function loadState(

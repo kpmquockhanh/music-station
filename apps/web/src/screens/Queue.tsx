@@ -1,22 +1,68 @@
 import { useState } from 'react'
-import type { QueueItem } from '@music-station/shared'
+import { AUTOPLAY_NAME, type QueueItem } from '@music-station/shared'
 import { formatTime } from '../format'
 import { Icon, IconButton, type IconName } from '../ui'
 import type { Station } from '../useStation'
 
-export function Queue({ queue, send }: { queue: QueueItem[]; send: Station['send'] }) {
+interface Props {
+  queue: QueueItem[]
+  autoplay: boolean
+  send: Station['send']
+}
+
+export function Queue({ queue, autoplay, send }: Props) {
+  return (
+    <div className="flex flex-col gap-3">
+      <AutoplaySwitch on={autoplay} send={send} />
+      {queue.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-line px-6 py-10 text-center">
+          <Icon name="queue" className="size-6 text-subtle" />
+          <p className="font-medium">The queue is empty</p>
+          <p className="text-sm text-muted">
+            {autoplay
+              ? 'Autoplay will add a song similar to the one playing.'
+              : 'Songs you add from search will line up here.'}
+          </p>
+        </div>
+      ) : (
+        <QueueList queue={queue} send={send} />
+      )}
+    </div>
+  )
+}
+
+function AutoplaySwitch({ on, send }: { on: boolean; send: Station['send'] }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={() => void send('station:autoplay', { enabled: !on })}
+      className="flex items-center gap-3 rounded-2xl bg-surface p-3 text-left ring-1 ring-line transition-colors duration-150 hover:bg-raised/60"
+    >
+      <span
+        className={`grid size-9 shrink-0 place-items-center rounded-xl transition-colors duration-150 ${on ? 'bg-accent/15 text-accent' : 'bg-raised text-subtle'}`}
+      >
+        <Icon name="sparkles" className="size-[18px]" />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="text-sm font-medium">Autoplay</span>
+        <span className="text-xs text-muted">Adds a similar song when the queue runs out</span>
+      </span>
+      <span
+        aria-hidden="true"
+        className={`relative h-6 w-10 shrink-0 rounded-full transition-colors duration-200 ${on ? 'bg-accent' : 'bg-overlay'}`}
+      >
+        <span
+          className={`absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow transition-transform duration-200 ease-out ${on ? 'translate-x-4' : ''}`}
+        />
+      </span>
+    </button>
+  )
+}
+
+function QueueList({ queue, send }: { queue: QueueItem[]; send: Station['send'] }) {
   const [open, setOpen] = useState<string | null>(null)
-
-  if (queue.length === 0) {
-    return (
-      <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-line px-6 py-10 text-center">
-        <Icon name="queue" className="size-6 text-subtle" />
-        <p className="font-medium">The queue is empty</p>
-        <p className="text-sm text-muted">Songs you add from search will line up here.</p>
-      </div>
-    )
-  }
-
   const move = (item: QueueItem, toIndex: number) => void send('queue:move', { itemId: item.id, toIndex })
 
   return (
@@ -48,6 +94,7 @@ export function Queue({ queue, send }: { queue: QueueItem[]; send: Station['send
                 <p className="flex min-w-0 items-center gap-1.5 text-xs text-subtle">
                   <span className="shrink-0 tabular-nums">{formatTime(item.duration)}</span>
                   <span aria-hidden="true">·</span>
+                  {item.addedBy === AUTOPLAY_NAME && <Icon name="sparkles" className="size-3 text-accent" />}
                   <span className="truncate">{item.addedBy}</span>
                   <StatusBadge status={item.status} />
                 </p>

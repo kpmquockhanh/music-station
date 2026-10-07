@@ -10,6 +10,7 @@ import {
   infoArgs,
   parseInfo,
   parseSearchOutput,
+  relatedArgs,
   searchArgs,
   transcodeArgs,
 } from './youtube'
@@ -32,6 +33,20 @@ describe('argument builders', () => {
 
   it('info rebuilds the URL from the id', () => {
     expect(infoArgs(ID)).toEqual(['--no-warnings', '--no-progress', '--dump-json', '--no-playlist', '--', URL_])
+  })
+
+  it('related reads the Mix playlist of the video', () => {
+    expect(relatedArgs(ID)).toEqual([
+      '--no-warnings',
+      '--no-progress',
+      '--flat-playlist',
+      '--dump-json',
+      '--playlist-end',
+      '25',
+      '--',
+      `${URL_}&list=RD${ID}`,
+    ])
+    expect(() => relatedArgs('-rf')).toThrow(VideoRejected)
   })
 
   it('download saves the source next to the destination and prints its path', () => {
@@ -194,6 +209,16 @@ describe('createYouTube', () => {
     const yt = createYouTube({ bin: 'yt-dlp', maxDurationSec: 3_600 }, fake.run)
     await expect(yt.download(ID, '/tmp/a.m4a')).rejects.toThrow('did not say where')
     expect(fake.calls).toHaveLength(1)
+  })
+
+  it('parses related songs like search results', async () => {
+    const other = 'znDgBy2mHbc'
+    const fake = fakeRun(
+      [ID, other].map((id) => JSON.stringify({ id, title: id, channel: 'c', duration: 200 })).join('\n'),
+    )
+    const yt = createYouTube({ bin: 'yt-dlp', maxDurationSec: 3_600 }, fake.run)
+    expect((await yt.related(ID)).map((r) => r.videoId)).toEqual([ID, other])
+    expect(fake.calls[0]!.timeoutMs).toBe(20_000)
   })
 
   it('rejects an invalid id without spawning', async () => {

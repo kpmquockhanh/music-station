@@ -27,6 +27,7 @@ export type ActionEvent =
   | 'player:pause'
   | 'player:skip'
   | 'player:seek'
+  | 'station:autoplay'
 
 export interface Toast {
   id: number

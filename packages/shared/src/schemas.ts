@@ -12,5 +12,6 @@ export const moveSchema = z.object({
   toIndex: z.number().int().min(0).max(MAX_QUEUE - 1),
 })
 export const seekSchema = z.object({ position: z.number().finite().min(0) })
+export const autoplaySchema = z.object({ enabled: z.boolean() })
 export const emptySchema = z.object({}).passthrough()
 export const searchQuerySchema = z.object({ q: z.string().trim().min(1).max(200) })

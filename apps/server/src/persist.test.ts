@@ -30,6 +30,8 @@ const sample = (savedAt = 1_000): Persisted => ({
   },
   queue: [],
   playback: { status: 'playing', position: 5, at: 500 },
+  autoplay: true,
+  history: ['dQw4w9WgXcQ'],
 })
 
 describe('saveState / loadState', () => {
@@ -37,6 +39,13 @@ describe('saveState / loadState', () => {
     await saveState(file, sample())
     expect(await loadState(file)).toEqual(sample())
     expect(await readdir(join(dir, 'nested'))).toEqual(['station.json'])
+  })
+
+  it('turns autoplay off for files saved before it existed', async () => {
+    const { autoplay: _a, history: _h, ...old } = sample()
+    await saveState(file, sample())
+    await writeFile(file, JSON.stringify(old))
+    expect(await loadState(file)).toEqual({ ...old, autoplay: false, history: [] })
   })
 
   it('returns null when the file does not exist', async () => {

@@ -2,6 +2,7 @@ import type { Server } from 'socket.io'
 import type { z, ZodTypeAny } from 'zod'
 import {
   addSchema,
+  autoplaySchema,
   emptySchema,
   joinSchema,
   moveSchema,
@@ -129,6 +130,7 @@ export function attachRealtime(io: Server, service: StationService, opts: Realti
     action('player:pause', emptySchema, (id) => service.pause(id))
     action('player:skip', emptySchema, (id) => service.skip(id))
     action('player:seek', seekSchema, (id, d) => service.seek(id, d.position))
+    action('station:autoplay', autoplaySchema, (id, d) => service.setAutoplay(id, d.enabled))
 
     socket.on('disconnect', () => {
       if (listenerId) release(listenerId)

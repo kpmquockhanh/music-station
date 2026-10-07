@@ -82,7 +82,7 @@ export function App() {
             />
             <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
               {tab === 'queue' ? (
-                <Queue queue={state.queue} send={station.send} />
+                <Queue queue={state.queue} autoplay={state.autoplay} send={station.send} />
               ) : (
                 <Listeners listeners={state.listeners} me={station.clientId} />
               )}

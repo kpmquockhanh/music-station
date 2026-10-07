@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { MAX_QUEUE, START_LEAD_MS, type QueueItem } from '@music-station/shared'
-import { Station, StationError } from './station'
+import { HISTORY_SIZE, Station, StationError } from './station'
 
 function item(over: Partial<QueueItem> = {}): QueueItem {
   return {
@@ -16,6 +16,8 @@ function item(over: Partial<QueueItem> = {}): QueueItem {
     ...over,
   }
 }
+
+const noAutoplay = { autoplay: false, history: [] }
 
 describe('listeners', () => {
   it('joins, renames on rejoin, and leaves', () => {
@@ -275,7 +277,7 @@ describe('snapshot, restore and ids', () => {
   it('restores paused at the position reached by savedAt', () => {
     const s = new Station()
     s.restore(
-      { current: item(), queue: [], playback: { status: 'playing', position: 10, at: 1_000 } },
+      { current: item(), queue: [], playback: { status: 'playing', position: 10, at: 1_000 }, ...noAutoplay },
       31_000,
       999_000,
       () => true,
@@ -287,7 +289,7 @@ describe('snapshot, restore and ids', () => {
   it('clamps a restored position to the song duration', () => {
     const s = new Station()
     s.restore(
-      { current: item({ duration: 100 }), queue: [], playback: { status: 'playing', position: 90, at: 0 } },
+      { current: item({ duration: 100 }), queue: [], playback: { status: 'playing', position: 90, at: 0 }, ...noAutoplay },
       60_000,
       70_000,
       () => true,
@@ -306,6 +308,7 @@ describe('snapshot, restore and ids', () => {
           item({ videoId: 'fffffffffff', status: 'failed' }),
         ],
         playback: { status: 'waiting', position: 0, at: 0 },
+        ...noAutoplay,
       },
       0,
       0,
@@ -323,5 +326,61 @@ describe('snapshot, restore and ids', () => {
     s.add(item({ videoId: 'aaaaaaaaaaa' }), 0)
     s.add(item({ videoId: 'bbbbbbbbbbb' }), 0)
     expect(s.protectedIds()).toEqual(new Set(['aaaaaaaaaaa', 'bbbbbbbbbbb']))
+  })
+})
+
+describe('autoplay', () => {
+  const A = 'aaaaaaaaaaa'
+  const B = 'bbbbbbbbbbb'
+
+  it('is off by default and has nothing to do', () => {
+    const s = new Station()
+    s.add(item({ videoId: A }), 0)
+    expect(s.snapshot().autoplay).toBe(false)
+    expect(s.autoplaySeed()).toBeNull()
+  })
+
+  it('seeds from the current song once nothing playable is queued', () => {
+    const s = new Station()
+    expect(s.setAutoplay(true)).toBe(true)
+    expect(s.setAutoplay(true)).toBe(false)
+    expect(s.autoplaySeed()).toBeNull() // nothing has played yet
+    s.add(item({ videoId: A }), 0)
+    expect(s.autoplaySeed()).toBe(A)
+    s.add(item({ videoId: B, status: 'failed' }), 0)
+    expect(s.autoplaySeed()).toBe(A)
+    s.add(item({ videoId: B }), 0)
+    expect(s.autoplaySeed()).toBeNull()
+  })
+
+  it('seeds from the last song played when the station is idle', () => {
+    const s = new Station()
+    s.setAutoplay(true)
+    s.add(item({ videoId: A }), 0)
+    s.skip(0)
+    expect(s.snapshot().current).toBeNull()
+    expect(s.autoplaySeed()).toBe(A)
+  })
+
+  it('remembers recent songs once each, newest last, and restores them', () => {
+    const s = new Station()
+    s.add(item({ videoId: A }), 0)
+    s.add(item({ videoId: B }), 0)
+    s.skip(0)
+    s.add(item({ videoId: A }), 0)
+    s.skip(0)
+    expect(s.persisted().history).toEqual([B, A])
+    expect(s.recentVideoIds()).toEqual(new Set([A, B]))
+
+    const many = Array.from({ length: HISTORY_SIZE + 5 }, (_, i) => `vid${String(i).padStart(8, '0')}`)
+    const r = new Station()
+    r.restore(
+      { current: null, queue: [], playback: { status: 'paused', position: 0, at: 0 }, autoplay: true, history: many },
+      0,
+      0,
+      () => true,
+    )
+    expect(r.snapshot().autoplay).toBe(true)
+    expect(r.persisted().history).toEqual(many.slice(-HISTORY_SIZE))
   })
 })
