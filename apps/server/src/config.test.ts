@@ -9,6 +9,8 @@ describe('loadConfig', () => {
       webDir: null,
       ytdlpBin: 'yt-dlp',
       cookies: undefined,
+      clientIpHeader: undefined,
+      syncLog: false,
       cacheMaxBytes: 2 * 1024 ** 3,
       maxDurationSec: 3_600,
     })
@@ -21,6 +23,7 @@ describe('loadConfig', () => {
       WEB_DIR: '/app/web',
       YTDLP_BIN: '/opt/yt-dlp/yt-dlp',
       YTDLP_COOKIES: '/data/cookies.txt',
+      CLIENT_IP_HEADER: 'CF-Connecting-IP',
       CACHE_MAX_GB: '0.5',
       MAX_DURATION_MIN: '15',
     })
@@ -30,6 +33,7 @@ describe('loadConfig', () => {
       webDir: '/app/web',
       ytdlpBin: '/opt/yt-dlp/yt-dlp',
       cookies: '/data/cookies.txt',
+      clientIpHeader: 'cf-connecting-ip',
       cacheMaxBytes: 0.5 * 1024 ** 3,
       maxDurationSec: 900,
     })

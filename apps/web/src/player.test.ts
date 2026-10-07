@@ -107,6 +107,7 @@ beforeEach(() => {
     serverNow: () => Date.now(),
     delayMs: () => delay,
     onBlocked: () => blocked++,
+    settleMs: 0,
   })
 })
 
@@ -180,11 +181,11 @@ describe('SyncPlayer', () => {
     await settle()
     audio.currentTime = 10.1
     player.correct()
-    expect(audio.playbackRate).toBe(0.97)
+    expect(audio.playbackRate).toBe(0.98)
     expect(player.lastDrift).toBeCloseTo(0.1)
     audio.currentTime = 9.9
     player.correct()
-    expect(audio.playbackRate).toBe(1.03)
+    expect(audio.playbackRate).toBe(1.02)
     audio.currentTime = 10.01
     player.correct()
     expect(audio.playbackRate).toBe(1)
@@ -320,6 +321,74 @@ describe('SyncPlayer drift correction while buffering', () => {
     expect(audio.currentTime).toBe(10)
     expect(audio.playbackRate).toBe(1)
   })
+
+  it('learns how late its seeks land and aims ahead, so it stops seeking', async () => {
+    player.update(item(A), playing(0, T0 - 10_000))
+    audio.loaded()
+    await settle()
+    audio.currentTime = 20
+    player.correct() // seeks to 10, but a slow seek lets the target move on by 1.5 s
+    expect(audio.currentTime).toBe(10)
+    vi.setSystemTime(Date.now() + 1_500)
+    player.correct() // landed 1.5 s behind: moves the lead halfway and aims at 11.5 + 0.75
+    expect(player.leadS).toBeCloseTo(0.75)
+    expect(audio.currentTime).toBeCloseTo(12.25)
+    const seeks = audio.seeks
+    vi.setSystemTime(Date.now() + 500)
+    player.correct() // landed 0.25 s ahead: small enough to ease the rate instead of seeking
+    expect(audio.seeks).toBe(seeks)
+    expect(audio.playbackRate).toBe(0.95)
+    expect(player.leadS).toBeCloseTo(0.625)
+  })
+
+  it('starts from the saved lead and reports what it learns', async () => {
+    const learned: number[] = []
+    player.destroy()
+    player = new SyncPlayer({
+      audio,
+      serverNow: () => Date.now(),
+      delayMs: () => delay,
+      onBlocked: () => blocked++,
+      settleMs: 0,
+      seekLeadS: 0.5,
+      onSeekLead: (s) => learned.push(s),
+    })
+    player.update(item(A), playing(0, T0 - 10_000))
+    audio.loaded()
+    await settle()
+    audio.currentTime = 20
+    player.correct()
+    expect(audio.currentTime).toBeCloseTo(10.5) // aims ahead from the first seek
+    vi.setSystemTime(Date.now() + 500)
+    audio.currentTime = 10.4 // the target is now 10.5: landed 0.1 s behind
+    player.correct()
+    expect(learned).toHaveLength(1)
+    expect(learned[0]).toBeCloseTo(0.55)
+  })
+
+  it('does not learn from a landing far off the target', async () => {
+    player.update(item(A), playing(0, T0 - 10_000))
+    audio.loaded()
+    await settle()
+    audio.currentTime = 20
+    player.correct()
+    vi.setSystemTime(Date.now() + 8_000) // a long stall, not seek latency
+    player.correct()
+    expect(audio.currentTime).toBeCloseTo(18)
+  })
+
+  it('forgets a pending landing when the station changes', async () => {
+    player.update(item(A), playing(0, T0 - 10_000))
+    audio.loaded()
+    await settle()
+    audio.currentTime = 20
+    player.correct()
+    player.update(item(A), playing(30, Date.now())) // someone seeked to 30 s
+    await settle()
+    audio.currentTime = 31.5
+    player.correct() // a 1.5 s drift, but not from the correction seek
+    expect(audio.currentTime).toBe(30)
+  })
 })
 
 describe('SyncPlayer pauses from outside', () => {
@@ -390,7 +459,7 @@ describe('SyncPlayer pauses from outside', () => {
     player.realign()
     expect(audio.plays).toBe(2)
     expect(audio.paused).toBe(false)
-    expect(audio.currentTime).toBeCloseTo(15)
+    expect(audio.currentTime).toBeCloseTo(15 + player.startLeadS) // the frozen fake clock taught it a start lead
     await settle()
     expect(blocked).toBe(0)
   })
@@ -462,3 +531,265 @@ describe('SyncPlayer resume()', () => {
     expect(audio.paused).toBe(true)
   })
 })
+
+describe('SyncPlayer settling after a seek', () => {
+  beforeEach(() => {
+    player.destroy()
+    player = new SyncPlayer({ audio, serverNow: () => Date.now(), delayMs: () => delay, onBlocked: () => blocked++, settleMs: 1_500 })
+  })
+
+  it('reports drift but does not correct while the element settles after starting', async () => {
+    player.update(item(A), playing(0, T0 - 10_000))
+    audio.loaded()
+    await settle()
+    audio.currentTime = 8.5 // iOS still shows the old time
+    const seeks = audio.seeks
+    player.correct()
+    expect(audio.seeks).toBe(seeks)
+    expect(player.lastDrift).toBeCloseTo(-1.5)
+    vi.setSystemTime(Date.now() + 1_500)
+    player.correct()
+    expect(audio.seeks).toBe(seeks + 1)
+  })
+
+  it('measures where a seek landed only after it settles', async () => {
+    player.update(item(A), playing(0, T0 - 10_000))
+    audio.loaded()
+    await settle()
+    vi.setSystemTime(Date.now() + 1_500)
+    audio.currentTime = 20
+    player.correct() // seeks to 11.5
+    vi.setSystemTime(Date.now() + 500)
+    audio.currentTime = 11.5 // frozen: would look 0.5 s late
+    let seeks = audio.seeks
+    player.correct()
+    expect(audio.seeks).toBe(seeks)
+    vi.setSystemTime(Date.now() + 1_000)
+    audio.currentTime = 13.1 // playing again, 0.1 s ahead after the jump
+    seeks = audio.seeks
+    player.correct()
+    expect(audio.seeks).toBe(seeks) // small drift: nudge the rate, no seek
+    expect(audio.playbackRate).toBe(0.98)
+    expect(player.leadS).toBe(0) // an early landing never makes the lead negative
+  })
+})
+
+describe('SyncPlayer starting with a learned lead', () => {
+  it('starts ahead of the target by the start lead and writes the rate only when it changes', async () => {
+    player.destroy()
+    let rateWrites = 0
+    const rated = audio as FakeAudio & { _rate?: number }
+    Object.defineProperty(rated, 'playbackRate', {
+      get: () => rated._rate ?? 1,
+      set: (v: number) => {
+        rated._rate = v
+        rateWrites++
+      },
+    })
+    player = new SyncPlayer({
+      audio,
+      serverNow: () => Date.now(),
+      delayMs: () => delay,
+      onBlocked: () => blocked++,
+      settleMs: 0,
+      startLeadS: 0.4,
+    })
+    player.update(item(A), playing(0, T0 - 10_000))
+    audio.loaded()
+    await settle()
+    expect(audio.currentTime).toBeCloseTo(10.4)
+    audio.currentTime = 9.9
+    player.correct()
+    player.correct()
+    expect(audio.playbackRate).toBe(1.02)
+    expect(rateWrites).toBe(1) // start() found 1 already set, and the second correction wanted the same rate
+  })
+})
+
+describe('SyncPlayer with a spare deck', () => {
+  let spare: FakeAudio
+  let downloads: string[]
+  const A_SRC = `/audio/${A}.m4a`
+  const B_SRC = `/audio/${B}.m4a`
+  const C = 'ccccccccccc'
+  // A plays from T0 - 190 s, so it ends at T0 + 10 s.
+  const nearEnd = playing(0, T0 - 190_000)
+  const endsAt = T0 + 10_000
+
+  beforeEach(() => {
+    player.destroy()
+    spare = new FakeAudio()
+    downloads = []
+    player = new SyncPlayer({
+      audio,
+      spare,
+      serverNow: () => Date.now(),
+      delayMs: () => delay,
+      onBlocked: () => blocked++,
+      settleMs: 0,
+      download: async (url) => {
+        downloads.push(url)
+        return { url: `blob:${url}`, release: () => {} }
+      },
+    })
+  })
+
+  const playingAWithBNext = async () => {
+    player.update(item(A), nearEnd, [item(B)])
+    await settle()
+    audio.loaded()
+    spare.loaded()
+    await settle()
+    expect(audio.paused).toBe(false)
+  }
+
+  it('downloads the next song and loads it into the spare while the current one plays', async () => {
+    await playingAWithBNext()
+    expect(downloads).toEqual([A_SRC, B_SRC])
+    expect(spare.src).toBe(`blob:${B_SRC}`)
+    expect(spare.paused).toBe(true)
+    expect(player.nextReady).toBe(true)
+  })
+
+  it('switches to the spare exactly at the boundary, without waiting for the server', async () => {
+    await playingAWithBNext()
+    await vi.advanceTimersByTimeAsync(10_000 - 500) // the handoff, 500 ms early
+    expect(audio.paused).toBe(false) // the old song plays out its last moment
+    expect(spare.paused).toBe(true)
+    await vi.advanceTimersByTimeAsync(500)
+    expect(Date.now()).toBe(endsAt)
+    expect(spare.paused).toBe(false)
+    expect(spare.currentTime).toBe(0) // the very start of the song
+    expect(audio.paused).toBe(true) // stopped as the new song started: no gap, no overlap
+    expect(player.stats.handoffs).toBe(1)
+    expect(spare.loads).toBe(1) // it never loaded at the change
+  })
+
+  it('changes nothing when the server confirms the switch', async () => {
+    await playingAWithBNext()
+    await vi.advanceTimersByTimeAsync(10_000)
+    const before = { plays: spare.plays, seeks: spare.seeks, loads: spare.loads }
+    player.update(item(B), playing(0, endsAt), []) // the server's tick, a moment later
+    await settle()
+    expect({ plays: spare.plays, seeks: spare.seeks, loads: spare.loads }).toEqual(before)
+    expect(spare.paused).toBe(false)
+  })
+
+  it('loads the song after next into the freed deck', async () => {
+    player.update(item(A), nearEnd, [item(B), item(C)])
+    await settle()
+    audio.loaded()
+    spare.loaded()
+    await settle()
+    await vi.advanceTimersByTimeAsync(10_000)
+    await settle()
+    expect(audio.src).toBe(`blob:/audio/${C}.m4a`)
+    expect(audio.paused).toBe(true)
+  })
+
+  it('does not switch ahead when the next song is still downloading on the server', async () => {
+    player.update(item(A), nearEnd, [item(B, 'downloading')])
+    await settle()
+    audio.loaded()
+    await settle()
+    await vi.advanceTimersByTimeAsync(11_000)
+    expect(player.stats.handoffs).toBe(0)
+    expect(spare.plays).toBe(0)
+  })
+
+  it('switches to the spare on a skip as well, without loading', async () => {
+    await playingAWithBNext()
+    player.update(item(B), playing(0, Date.now() + 1_000), []) // someone pressed skip
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(spare.paused).toBe(false)
+    expect(audio.paused).toBe(true)
+    expect(spare.loads).toBe(1)
+  })
+
+  it('stops both decks when the station pauses during a handoff', async () => {
+    await playingAWithBNext()
+    await vi.advanceTimersByTimeAsync(10_000 - 500)
+    player.update(item(B), paused(0), [])
+    expect(audio.paused).toBe(true)
+    expect(spare.paused).toBe(true)
+  })
+
+  it('ignores pause events from the spare', async () => {
+    await playingAWithBNext()
+    spare.emit('pause')
+    await settle()
+    expect(blocked).toBe(0)
+  })
+
+  it('unlocks the spare inside the resume tap without leaving it playing', async () => {
+    await playingAWithBNext()
+    const plays = spare.plays
+    player.resume()
+    expect(spare.plays).toBe(plays + 1)
+    expect(spare.paused).toBe(true)
+  })
+})
+
+describe('SyncPlayer start lead', () => {
+  let learned: number[]
+  const make = (startLeadS: number, spare?: FakeAudio) => {
+    player.destroy()
+    learned = []
+    player = new SyncPlayer({
+      audio,
+      spare,
+      serverNow: () => Date.now(),
+      delayMs: () => delay,
+      onBlocked: () => blocked++,
+      settleMs: 1_500,
+      startLeadS,
+      onStartLead: (s) => learned.push(s),
+    })
+  }
+
+  it('calls play() early by the start lead, parked at the start position', async () => {
+    make(0.5)
+    player.update(item(A), playing(0, T0 + 1_000)) // the station starts in 1 s
+    audio.loaded()
+    await settle()
+    expect(audio.paused).toBe(true)
+    await vi.advanceTimersByTimeAsync(499)
+    expect(audio.paused).toBe(true)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(audio.paused).toBe(false) // 500 ms before the start time
+    expect(audio.currentTime).toBeCloseTo(0) // nothing of the song is skipped
+  })
+
+  it('learns the start lead from where a start landed, apart from the seek lead', async () => {
+    make(0)
+    player.update(item(A), playing(0, T0 + 1_000))
+    audio.loaded()
+    await settle()
+    await vi.advanceTimersByTimeAsync(1_000) // play() now; the fake clock stands still like a slow start
+    vi.setSystemTime(Date.now() + 1_500)
+    audio.currentTime = 1.0 // the media clock moved 1.0 s in 1.5 s: it started 0.5 s late
+    player.correct()
+    expect(learned).toHaveLength(1)
+    expect(learned[0]).toBeCloseTo(0.25) // halfway to 0.5 s
+    expect(player.startLeadS).toBeCloseTo(0.25)
+    expect(player.leadS).toBe(0)
+  })
+
+  it('on a song change, starts the next song early and stops the old one exactly at the boundary', async () => {
+    const spare = new FakeAudio()
+    make(0.3, spare)
+    player.update(item(A), playing(0, T0 - 190_000), [item(B)]) // A ends at T0 + 10 s
+    audio.loaded()
+    spare.loaded()
+    await settle()
+    await vi.advanceTimersByTimeAsync(10_000 - 300)
+    expect(spare.paused).toBe(false) // play() 300 ms early, at the very start of B
+    expect(spare.currentTime).toBe(0)
+    expect(audio.paused).toBe(false) // A still sounds until the boundary
+    await vi.advanceTimersByTimeAsync(299)
+    expect(audio.paused).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(audio.paused).toBe(true) // stopped exactly at the boundary
+  })
+})
+

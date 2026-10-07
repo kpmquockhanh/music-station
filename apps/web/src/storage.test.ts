@@ -1,5 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { clampDelay, getClientId, getDelayMs, newUuid, saveDelayMs, type KeyValueStore } from './storage'
+import {
+  clampDelay,
+  getClientId,
+  getDelayMs,
+  getSeekLeadMs,
+  getStartLeadMs,
+  getUpdateReload,
+  newUuid,
+  saveDelayMs,
+  saveSeekLeadMs,
+  saveStartLeadMs,
+  saveUpdateReload,
+  type KeyValueStore,
+} from './storage'
 
 const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
@@ -53,5 +66,42 @@ describe('delay', () => {
     expect(clampDelay(-20)).toBe(0)
     store.setItem('musicStation.delayMs', 'abc')
     expect(getDelayMs(store)).toBe(0)
+  })
+})
+
+describe('seek lead', () => {
+  it('survives a reload and ignores damaged values', () => {
+    const store = memoryStore()
+    expect(getSeekLeadMs(store)).toBe(0)
+    saveSeekLeadMs(485.4, store)
+    expect(getSeekLeadMs(store)).toBe(485)
+    store.setItem('musicStation.seekLeadMs', '9000')
+    expect(getSeekLeadMs(store)).toBe(2_000)
+    store.setItem('musicStation.seekLeadMs', 'abc')
+    expect(getSeekLeadMs(store)).toBe(0)
+  })
+})
+
+describe('start lead', () => {
+  it('survives a reload and ignores damaged values', () => {
+    const store = memoryStore()
+    expect(getStartLeadMs(store)).toBe(0)
+    saveStartLeadMs(512.6, store)
+    expect(getStartLeadMs(store)).toBe(513)
+    store.setItem('musicStation.startLeadMs', '-40')
+    expect(getStartLeadMs(store)).toBe(0)
+  })
+})
+
+describe('update reload', () => {
+  it('remembers when the tab reloaded itself and whether it had joined', () => {
+    const store = memoryStore()
+    expect(getUpdateReload(store)).toEqual({ at: 0, rejoin: false })
+    saveUpdateReload({ at: 1_791_338_205_973, rejoin: true }, store)
+    expect(getUpdateReload(store)).toEqual({ at: 1_791_338_205_973, rejoin: true })
+    saveUpdateReload({ at: 5, rejoin: false }, store)
+    expect(getUpdateReload(store)).toEqual({ at: 5, rejoin: false })
+    store.setItem('musicStation.updateReloadAt', 'abc')
+    expect(getUpdateReload(store)).toEqual({ at: 0, rejoin: false })
   })
 })

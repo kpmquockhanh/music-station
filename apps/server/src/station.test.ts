@@ -239,6 +239,23 @@ describe('tick', () => {
     expect(s.snapshot().current?.id).toBe(b.id)
   })
 
+  it('starts the next song exactly when the last one ended, with no gap', () => {
+    const s = new Station()
+    const b = item()
+    s.add(item({ duration: 10 }), 0) // plays 1000..11000
+    s.add(b, 0)
+    expect(s.tick(11_200)).toBe(true) // the tick runs a little late
+    expect(s.snapshot().playback).toEqual({ status: 'playing', position: 0, at: 11_000 })
+  })
+
+  it('starts the next song fresh after a long stall', () => {
+    const s = new Station()
+    s.add(item({ duration: 10 }), 0)
+    s.add(item(), 0)
+    expect(s.tick(60_000)).toBe(true) // the host slept
+    expect(s.snapshot().playback).toEqual({ status: 'playing', position: 0, at: 61_000 })
+  })
+
   it('does nothing while paused', () => {
     const s = new Station()
     s.add(item({ duration: 10 }), 0)

@@ -7,6 +7,8 @@ import type { SearchFn } from './search'
 export interface HttpOptions {
   cacheDir: string
   webDir: string | null
+  /** Header holding the visitor's IP, set by a proxy that overwrites it (Cloudflare's cf-connecting-ip). */
+  clientIpHeader?: string
   hasAudio(videoId: string): boolean
   search: SearchFn
   logger?: boolean
@@ -15,11 +17,17 @@ export interface HttpOptions {
 const AUDIO_RE = /^([A-Za-z0-9_-]{11})\.m4a$/
 
 export async function buildHttp(opts: HttpOptions): Promise<FastifyInstance> {
-  // Funnel's serve proxy dials 127.0.0.1:3000, so trust X-Forwarded-For only from loopback.
-  // A direct client on port 3000 could otherwise pick a new IP per request and dodge the limit.
-  const app = Fastify({ logger: opts.logger ?? false, trustProxy: 'loopback' })
+  // Ignore X-Forwarded-For: a client could pick a new IP per request and dodge the limit.
+  const app = Fastify({ logger: opts.logger ?? false, trustProxy: false })
 
-  await app.register(rateLimit, { global: false })
+  const header = opts.clientIpHeader
+  await app.register(rateLimit, {
+    global: false,
+    keyGenerator: (req) => {
+      const value = header ? req.headers[header] : undefined
+      return typeof value === 'string' && value !== '' ? value : req.ip
+    },
+  })
   // One static instance: it serves the web UI when webDir is set, and always provides reply.sendFile.
   await app.register(fastifyStatic, { root: opts.webDir ?? opts.cacheDir, serve: opts.webDir !== null })
 
@@ -41,4 +49,12 @@ export async function buildHttp(opts: HttpOptions): Promise<FastifyInstance> {
   })
 
   return app
+}
+
+/**
+ * Names the web build by its hashed main script, such as /assets/index-s_cwYgfE.js. It changes with every
+ * change to the UI, and the page knows its own from the script tag it loaded, so the two can be compared.
+ */
+export function webVersionOf(indexHtml: string): string | null {
+  return indexHtml.match(/<script[^>]*\ssrc="(\/assets\/[^"]+\.js)"/)?.[1] ?? null
 }

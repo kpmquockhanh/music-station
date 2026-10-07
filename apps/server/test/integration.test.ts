@@ -24,6 +24,7 @@ const config = (): Config => ({
   dataDir,
   webDir: null,
   ytdlpBin: 'unused',
+  syncLog: false,
   cacheMaxBytes: 1e9,
   maxDurationSec: 3_600,
 })

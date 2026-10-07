@@ -4,6 +4,8 @@ export interface Config {
   webDir: string | null
   ytdlpBin: string
   cookies?: string
+  clientIpHeader?: string
+  syncLog: boolean
   cacheMaxBytes: number
   maxDurationSec: number
 }
@@ -25,6 +27,8 @@ export function loadConfig(env: Env = process.env): Config {
     webDir: env.WEB_DIR || null,
     ytdlpBin: env.YTDLP_BIN || 'yt-dlp',
     cookies: env.YTDLP_COOKIES || undefined,
+    clientIpHeader: env.CLIENT_IP_HEADER?.toLowerCase() || undefined,
+    syncLog: env.SYNC_LOG === '1',
     cacheMaxBytes: positive(env, 'CACHE_MAX_GB', 2) * 1024 ** 3,
     maxDurationSec: positive(env, 'MAX_DURATION_MIN', 60) * 60,
   }

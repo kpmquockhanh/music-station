@@ -4,51 +4,44 @@ Open one link, add songs to one shared queue, and everyone hears the same song a
 
 ## What you need
 
-- A Mac with Docker Desktop or OrbStack.
-- A Tailscale account. The free plan is enough.
-
-## One-time Tailscale setup
-
-1. In the Tailscale admin console, open **DNS** and turn on **MagicDNS** and **HTTPS Certificates**.
-2. Open **Access controls** and allow Funnel by adding this entry to the policy file. If the file already has `nodeAttrs`, add the entry to that list.
-   ```json
-   "nodeAttrs": [
-     { "target": ["autogroup:member"], "attr": ["funnel"] }
-   ]
-   ```
-3. Open **Settings → Keys** and generate an auth key. If your tailnet requires device approval, tick **Pre-approved**.
+- A Raspberry Pi 5 (or any Linux box or Mac) with Docker and the Compose plugin.
 
 ## Start the station
 
 ```bash
-cp .env.example .env    # then paste the auth key after TS_AUTHKEY=
+cp .env.example .env    # optional, to change the defaults below
 docker compose up -d --build
-docker compose exec tailscale tailscale funnel status
 ```
 
-The last command prints the public link, `https://music-station.<your-tailnet>.ts.net`. Send it to your friends. The first visit can take up to a minute while Tailscale gets a certificate.
+Open `http://<pi-ip>:3000` from any device on the same Wi-Fi and share that link. The first build on a Pi takes a few minutes. Anyone on the network can join and control the queue.
 
-On the Mac you can also use `http://localhost:3000`, and devices on your Wi-Fi can use `http://<mac-ip>:3000`.
+## Public access (optional)
 
-The auth key is only used for the first login. The login is then kept in `data/tailscale`, so it does not matter if the key expires later.
+A Cloudflare Tunnel gives the station a public https link, such as `https://music.example.com`, without opening a port on your router. You need a domain on Cloudflare; the free plan is enough. The Wi-Fi link keeps working.
 
-If the link says `music-station-1`, an old device named `music-station` still exists. Remove it in the admin console, then run `docker compose restart tailscale`.
+1. In the Cloudflare dashboard, open **Zero Trust → Networks → Tunnels** and create a tunnel of type **Cloudflared**. Name it `music-station`.
+2. Copy the token from the install command it shows (the long string after `--token`). You do not need to run that command.
+3. Add a public hostname: pick a subdomain such as `music` and your domain, set the service type to **HTTP** and the URL to `app:3000`.
+4. In `.env`, set:
+   ```
+   COMPOSE_PROFILES=tunnel
+   TUNNEL_TOKEN=<the token>
+   ```
+5. Run `docker compose up -d`, then `docker compose logs cloudflared`. Lines saying `Registered tunnel connection` mean it is up.
 
-### Keep the Mac awake
+Anyone with the link can join and control the queue. To limit who can open it, add a Cloudflare Access application for the hostname in **Zero Trust → Access**.
 
-Docker does not stop the Mac from sleeping. While the station is on, run this in a terminal and leave it open:
+### On a Raspberry Pi
 
-```bash
-caffeinate -s
-```
-
-This only works while the Mac is plugged in, and closing the lid still puts it to sleep.
+- Raspberry Pi OS runs the Pi 5 with a 16K memory-page kernel, which some arm64 programs do not support. If the app log shows a crash about the page size, add `kernel=kernel8.img` to `/boot/firmware/config.txt` and reboot.
+- Downloaded audio goes to `data/app/cache`. An SSD or USB drive lasts longer than an SD card.
 
 ### Everyday commands
 
 | Task | Command |
 |---|---|
 | Follow the app log | `docker compose logs -f app` |
+| Follow the tunnel log | `docker compose logs -f cloudflared` |
 | Stop | `docker compose down` |
 | Rebuild after changing the code | `docker compose up -d --build` |
 | Check yt-dlp against YouTube | `docker compose exec app node apps/server/dist/smoke.js "metronome 120 bpm"` |
@@ -59,10 +52,12 @@ yt-dlp updates itself when the app starts and every 24 hours. `docker compose re
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `TS_AUTHKEY` | required | Tailscale auth key |
+| `COMPOSE_PROFILES` | unset | `tunnel` starts the Cloudflare Tunnel |
+| `TUNNEL_TOKEN` | unset | Cloudflare Tunnel token |
 | `CACHE_MAX_GB` | `2` | Soft cap for downloaded audio. The oldest songs that are not playing or queued are deleted first. |
 | `MAX_DURATION_MIN` | `60` | Longer videos are rejected |
 | `YTDLP_COOKIES` | unset | Path inside the container to a cookies file. See below. |
+| `SYNC_LOG` | unset | `1` logs each device's sync status every 5 seconds |
 
 The app keeps everything in `data/app`: audio files in `cache/` and the queue in `station.json`. To free space, stop the station and delete `data/app/cache`.
 

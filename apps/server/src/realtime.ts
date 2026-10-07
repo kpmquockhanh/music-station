@@ -17,6 +17,10 @@ export interface RealtimeOptions {
   actionIntervalMs?: number
   now?: () => number
   log?: (msg: string) => void
+  /** Logs the sync status each device reports. */
+  syncLog?: boolean
+  /** The web build the server serves. Pages built differently reload themselves to get it. */
+  webVersion?: string | null
 }
 
 export interface Realtime {
@@ -57,7 +61,20 @@ export function attachRealtime(io: Server, service: StationService, opts: Realti
 
   io.on('connection', (socket) => {
     let listenerId: string | null = null
+    let nickname = ''
     let lastActionAt = Number.NEGATIVE_INFINITY
+    let lastReportAt = Number.NEGATIVE_INFINITY
+
+    // Also on every reconnect, which is how open pages learn about a deploy: the restart drops their socket.
+    if (opts.webVersion) socket.emit('hello', { webVersion: opts.webVersion })
+
+    socket.on('debug:sync', (payload: unknown) => {
+      if (!opts.syncLog || !listenerId || typeof payload !== 'object' || payload === null) return
+      const t = now()
+      if (t - lastReportAt < 1_000) return
+      lastReportAt = t
+      log(`[sync] ${nickname}: ${JSON.stringify(payload).slice(0, 600)}`)
+    })
 
     socket.on('time:ping', (_t0: unknown, ack: unknown) => {
       if (typeof ack === 'function') ack(now())
@@ -66,7 +83,8 @@ export function attachRealtime(io: Server, service: StationService, opts: Realti
     socket.on('join', (payload: unknown, ack: unknown) => {
       const parsed = joinSchema.safeParse(payload)
       if (!parsed.success) return reply(ack, { ok: false, error: 'Pick a nickname of 1–24 characters' })
-      const { clientId, nickname } = parsed.data
+      const { clientId } = parsed.data
+      nickname = parsed.data.nickname
       if (listenerId !== clientId) {
         if (listenerId) release(listenerId)
         listenerId = clientId

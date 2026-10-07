@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decideCorrection, expectedPosition, targetPosition } from './sync'
+import { decideCorrection, expectedPosition, songEndsAt, targetPosition } from './sync'
 import type { Playback } from './types'
 
 describe('expectedPosition', () => {
@@ -30,14 +30,25 @@ describe('decideCorrection', () => {
     expect(decideCorrection(10.02, 10)).toEqual({ rate: 1, seekTo: null })
     expect(decideCorrection(9.98, 10)).toEqual({ rate: 1, seekTo: null })
   })
-  it('slows down when ahead by 30–300 ms', () => {
-    expect(decideCorrection(10.1, 10)).toEqual({ rate: 0.97, seekTo: null })
+  it('slows down in proportion when ahead by up to 1 s', () => {
+    expect(decideCorrection(10.1, 10)).toEqual({ rate: 0.98, seekTo: null })
+    expect(decideCorrection(10.2, 10)).toEqual({ rate: 0.96, seekTo: null })
   })
-  it('speeds up when behind by 30–300 ms', () => {
-    expect(decideCorrection(9.8, 10)).toEqual({ rate: 1.03, seekTo: null })
+  it('speeds up in proportion when behind by up to 1 s', () => {
+    expect(decideCorrection(9.8, 10)).toEqual({ rate: 1.04, seekTo: null })
   })
-  it('jumps when more than 300 ms off', () => {
-    expect(decideCorrection(11, 10)).toEqual({ rate: 1, seekTo: 10 })
+  it('caps the rate change at 6%', () => {
+    expect(decideCorrection(9.5, 10)).toEqual({ rate: 1.06, seekTo: null })
+    expect(decideCorrection(11, 10)).toEqual({ rate: 0.94, seekTo: null })
+  })
+  it('jumps when more than 1 s off', () => {
+    expect(decideCorrection(11.5, 10)).toEqual({ rate: 1, seekTo: 10 })
     expect(decideCorrection(5, 10)).toEqual({ rate: 1, seekTo: 10 })
+  })
+})
+
+describe('songEndsAt', () => {
+  it('is the server time the song reaches its duration', () => {
+    expect(songEndsAt({ status: 'playing', position: 10, at: 1_000 }, 200)).toBe(191_000)
   })
 })

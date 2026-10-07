@@ -1,9 +1,10 @@
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { FastifyInstance } from 'fastify'
 import { Server } from 'socket.io'
 import { AudioCache } from './cache'
 import type { Config } from './config'
-import { buildHttp } from './http'
+import { buildHttp, webVersionOf } from './http'
 import { createSaver, loadState } from './persist'
 import { attachRealtime, type Realtime } from './realtime'
 import { createSearch } from './search'
@@ -64,11 +65,15 @@ export async function createApp(deps: AppDeps): Promise<App> {
   const http = await buildHttp({
     cacheDir,
     webDir: config.webDir,
+    clientIpHeader: config.clientIpHeader,
     hasAudio: (id) => cache.has(id),
     search: createSearch((q) => youtube.search(q)),
   })
   const io = new Server(http.server, { serveClient: false })
-  realtime = attachRealtime(io, service, { now, log, graceMs: deps.graceMs })
+  const webVersion = config.webDir
+    ? webVersionOf(await readFile(join(config.webDir, 'index.html'), 'utf8').catch(() => ''))
+    : null
+  realtime = attachRealtime(io, service, { now, log, graceMs: deps.graceMs, syncLog: config.syncLog, webVersion })
 
   const tick = setInterval(() => service.tick(), TICK_MS)
   // A crash skips close(), so keep savedAt fresh while the position moves (Review Focus 5).

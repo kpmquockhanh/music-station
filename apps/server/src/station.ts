@@ -2,12 +2,16 @@ import {
   MAX_QUEUE,
   START_LEAD_MS,
   expectedPosition,
+  songEndsAt,
   type Playback,
   type QueueItem,
   type StationState,
 } from '@music-station/shared'
 
 export class StationError extends Error {}
+
+/** A tick later than this after a song's end (the host slept) starts the next song fresh, not mid-song. */
+const MAX_LATE_HANDOFF_MS = 2_000
 
 export interface StationSnapshot {
   current: QueueItem | null
@@ -117,7 +121,9 @@ export class Station {
   tick(now: number): boolean {
     if (!this.current || this.playback.status !== 'playing') return false
     if (expectedPosition(this.playback, now) < this.current.duration) return false
-    this.advance(now)
+    // Devices that loaded the next song switched to it at this exact time already, without waiting for the tick.
+    const endsAt = songEndsAt(this.playback, this.current.duration)
+    this.advance(now, now - endsAt <= MAX_LATE_HANDOFF_MS ? endsAt : undefined)
     return true
   }
 
@@ -153,21 +159,21 @@ export class Station {
     return [...new Set(all.filter((q) => q.status === 'downloading').map((q) => q.videoId))]
   }
 
-  private advance(now: number): void {
+  private advance(now: number, at?: number): void {
     const i = this.queue.findIndex((q) => q.status !== 'failed')
     if (i < 0) {
       this.current = null
       this.playback = idle()
       return
     }
-    this.setCurrent(this.queue.splice(i, 1)[0]!, now)
+    this.setCurrent(this.queue.splice(i, 1)[0]!, now, at)
   }
 
-  private setCurrent(item: QueueItem, now: number): void {
+  private setCurrent(item: QueueItem, now: number, at = now + START_LEAD_MS): void {
     this.current = item
     this.playback =
       item.status === 'ready'
-        ? { status: 'playing', position: 0, at: now + START_LEAD_MS }
+        ? { status: 'playing', position: 0, at }
         : { status: 'waiting', position: 0, at: now }
   }
 

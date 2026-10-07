@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FastifyInstance } from 'fastify'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildHttp } from './http'
+import { buildHttp, webVersionOf } from './http'
 
 const A = 'aaaaaaaaaaa'
 let dir: string
@@ -91,13 +91,22 @@ describe('/api/search', () => {
     expect((await app.inject('/api/search?q=x')).statusCode).toBe(429)
   })
 
-  it('trusts X-Forwarded-For only from the local proxy', async () => {
+  it('ignores X-Forwarded-For', async () => {
     await build()
     const search = (remoteAddress: string, ip: string) =>
       app.inject({ url: '/api/search?q=x', remoteAddress, headers: { 'x-forwarded-for': ip } })
     for (let i = 0; i < 30; i++) expect((await search('10.0.0.5', `1.2.3.${i}`)).statusCode).toBe(200)
     expect((await search('10.0.0.5', '1.2.3.99')).statusCode).toBe(429) // a spoofed header buys nothing
-    expect((await search('127.0.0.1', '5.6.7.8')).statusCode).toBe(200) // Funnel users keep their own limit
+    expect((await search('10.0.0.6', '1.2.3.99')).statusCode).toBe(200) // other clients keep their own limit
+  })
+
+  it('limits by the client IP header when one is configured', async () => {
+    await build({ clientIpHeader: 'cf-connecting-ip' })
+    const search = (ip: string) =>
+      app.inject({ url: '/api/search?q=x', remoteAddress: '172.18.0.3', headers: { 'cf-connecting-ip': ip } })
+    for (let i = 0; i < 30; i++) expect((await search('1.2.3.4')).statusCode).toBe(200)
+    expect((await search('1.2.3.4')).statusCode).toBe(429)
+    expect((await search('5.6.7.8')).statusCode).toBe(200) // visitors behind the same tunnel keep their own limit
   })
 })
 
@@ -111,5 +120,15 @@ describe('web UI', () => {
     expect(res.body).toContain('Music Station')
     expect((await app.inject(`/audio/${A}.m4a`)).statusCode).toBe(200)
     await rm(web, { recursive: true, force: true })
+  })
+})
+
+describe('webVersionOf', () => {
+  it('names the build by its main script', () => {
+    const html = '<head><script type="module" crossorigin src="/assets/index-s_cwYgfE.js"></script></head>'
+    expect(webVersionOf(html)).toBe('/assets/index-s_cwYgfE.js')
+  })
+  it('is null without a built script, as in development', () => {
+    expect(webVersionOf('<script type="module" src="/src/main.tsx"></script>')).toBeNull()
   })
 })

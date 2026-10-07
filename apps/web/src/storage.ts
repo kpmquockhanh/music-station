@@ -6,11 +6,23 @@ export interface KeyValueStore {
 const CLIENT_ID = 'musicStation.clientId'
 const NICKNAME = 'musicStation.nickname'
 const DELAY = 'musicStation.delayMs'
+const SEEK_LEAD = 'musicStation.seekLeadMs'
+const START_LEAD = 'musicStation.startLeadMs'
+const UPDATE_RELOAD = 'musicStation.updateReloadAt'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function browserStore(): KeyValueStore | null {
   try {
     return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+/** Per tab, so one tab's automatic reload never affects another's. */
+function tabStore(): KeyValueStore | null {
+  try {
+    return window.sessionStorage
   } catch {
     return null
   }
@@ -67,4 +79,39 @@ export function getDelayMs(store: KeyValueStore | null = browserStore()): number
 
 export function saveDelayMs(ms: number, store: KeyValueStore | null = browserStore()): void {
   write(store, DELAY, String(clampDelay(ms)))
+}
+
+export function getSeekLeadMs(store: KeyValueStore | null = browserStore()): number {
+  const n = Number(read(store, SEEK_LEAD))
+  return Number.isFinite(n) ? Math.min(2_000, Math.max(0, Math.round(n))) : 0
+}
+
+export function saveSeekLeadMs(ms: number, store: KeyValueStore | null = browserStore()): void {
+  write(store, SEEK_LEAD, String(Math.round(ms)))
+}
+
+export function getStartLeadMs(store: KeyValueStore | null = browserStore()): number {
+  const n = Number(read(store, START_LEAD))
+  return Number.isFinite(n) ? Math.min(2_000, Math.max(0, Math.round(n))) : 0
+}
+
+export function saveStartLeadMs(ms: number, store: KeyValueStore | null = browserStore()): void {
+  write(store, START_LEAD, String(Math.round(ms)))
+}
+
+export interface UpdateReload {
+  /** When this tab last reloaded itself for a new version, in ms since the epoch; 0 if never. */
+  at: number
+  /** The tab had joined, so it rejoins after the reload. */
+  rejoin: boolean
+}
+
+export function getUpdateReload(store: KeyValueStore | null = tabStore()): UpdateReload {
+  const [at, rejoin] = (read(store, UPDATE_RELOAD) ?? '').split(':')
+  const n = Number(at)
+  return Number.isFinite(n) && n > 0 ? { at: n, rejoin: rejoin === '1' } : { at: 0, rejoin: false }
+}
+
+export function saveUpdateReload(r: UpdateReload, store: KeyValueStore | null = tabStore()): void {
+  write(store, UPDATE_RELOAD, `${r.at}:${r.rejoin ? 1 : 0}`)
 }
