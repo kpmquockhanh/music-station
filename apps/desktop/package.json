@@ -7,6 +7,8 @@
   "author": "Music Station",
   "main": "dist/main.js",
   "scripts": {
+    "build": "esbuild src/main.ts src/preload.ts --bundle --platform=node --format=cjs --target=node22 --external:electron --outdir=dist",
+    "dev": "pnpm build && electron .",
     "icons": "node scripts/icons.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
