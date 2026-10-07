@@ -35,6 +35,7 @@ Anyone with the link can join and control the queue. To limit who can open it, a
 
 - Raspberry Pi OS runs the Pi 5 with a 16K memory-page kernel, which some arm64 programs do not support. If the app log shows a crash about the page size, add `kernel=kernel8.img` to `/boot/firmware/config.txt` and reboot.
 - Downloaded audio goes to `data/app/cache`. An SSD or USB drive lasts longer than an SD card.
+- A 1 GB Pi runs the station fine but struggles to build it. `scripts/deploy-pi.sh` builds the arm64 image on your computer, sends it to the Pi over SSH and restarts the containers there. It deploys to `pi@pi-linhng:~/music-station` unless `DEPLOY_HOST` or `DEPLOY_DIR` say otherwise. Add `--env` to also copy your `.env`; the first deploy needs it.
 
 ### Everyday commands
 
