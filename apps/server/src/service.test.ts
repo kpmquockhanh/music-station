@@ -17,6 +17,7 @@ function setup(
     cached?: string[]
     getInfo?: (id: string) => Promise<VideoInfo>
     related?: (id: string) => Promise<SearchResult[]>
+    idlePauseMs?: number
   } = {},
 ) {
   const files = new Set(opts.cached ?? [])
@@ -64,6 +65,7 @@ function setup(
     onChange,
     onActivity: (text) => activity.push(text),
     log: (msg) => logs.push(msg),
+    idlePauseMs: opts.idlePauseMs,
   })
   service.join('l1', 'Minh')
   activity.length = 0
@@ -335,6 +337,88 @@ describe('listeners', () => {
     s.service.leave('l2')
     s.service.leave('l2')
     expect(s.activity).toEqual(['An joined', 'An left'])
+  })
+})
+
+describe('pause with nobody listening', () => {
+  const IDLE = 5 * 60_000
+
+  it('pauses for everyone once nobody has been joined for the idle time', async () => {
+    const s = setup({ cached: [A], idlePauseMs: IDLE })
+    s.station.add({ ...info(A), id: 'long', duration: 3_600, addedBy: 'Minh', status: 'ready' }, 0) // plays from 1 s
+    s.setTime(10_000)
+    s.service.leave('l1')
+    s.service.tick() // the station is empty from here
+    s.activity.length = 0
+    s.setTime(10_000 + IDLE - 1)
+    s.service.tick()
+    expect(s.service.state().playback.status).toBe('playing')
+    s.setTime(10_000 + IDLE)
+    s.service.tick()
+    expect(s.service.state().playback).toEqual({ status: 'paused', position: 309, at: 10_000 + IDLE })
+    expect(s.activity).toEqual(['Paused after 5 minutes with nobody listening'])
+  })
+
+  it('stays paused when someone joins, and tells them why until someone plays', async () => {
+    const s = setup({ cached: [A], idlePauseMs: 60_000 })
+    s.station.add({ ...info(A), id: 'long', duration: 3_600, addedBy: 'Minh', status: 'ready' }, 0)
+    s.service.leave('l1')
+    s.service.tick()
+    s.setTime(60_000)
+    s.service.tick()
+    s.activity.length = 0
+    s.service.join('l2', 'An')
+    expect(s.service.state().playback.status).toBe('paused')
+    expect(s.activity).toEqual(['An joined', 'Paused after 1 minute with nobody listening'])
+    s.service.play('l2')
+    s.service.join('l3', 'Lan')
+    expect(s.activity.at(-1)).toBe('Lan joined')
+  })
+
+  it('restarts the wait when someone joins and leaves again', async () => {
+    const s = setup({ cached: [A], idlePauseMs: 60_000 })
+    s.station.add({ ...info(A), id: 'long', duration: 3_600, addedBy: 'Minh', status: 'ready' }, 0)
+    s.service.leave('l1')
+    s.service.tick()
+    s.setTime(50_000)
+    s.service.join('l2', 'An')
+    s.service.leave('l2')
+    s.service.tick()
+    s.setTime(100_000)
+    s.service.tick()
+    expect(s.service.state().playback.status).toBe('playing')
+    s.setTime(110_000)
+    s.service.tick()
+    expect(s.service.state().playback.status).toBe('paused')
+  })
+
+  it('also stops a song that is still downloading, so it does not start for nobody', async () => {
+    const s = setup({ idlePauseMs: 60_000 })
+    await s.service.add('l1', A)
+    expect(s.service.state().playback.status).toBe('waiting')
+    s.service.leave('l1')
+    s.service.tick()
+    s.setTime(60_000)
+    s.service.tick()
+    s.pending[0]!.resolve()
+    await flush()
+    expect(s.service.state().playback.status).toBe('paused')
+  })
+
+  it('does nothing while someone is joined, or with the idle pause off', async () => {
+    const on = setup({ cached: [A], idlePauseMs: 60_000 })
+    on.station.add({ ...info(A), id: 'long', duration: 3_600, addedBy: 'Minh', status: 'ready' }, 0)
+    on.setTime(600_000)
+    on.service.tick()
+    expect(on.service.state().playback.status).toBe('playing')
+
+    const off = setup({ cached: [A] })
+    off.station.add({ ...info(A), id: 'long', duration: 3_600, addedBy: 'Minh', status: 'ready' }, 0)
+    off.service.leave('l1')
+    off.service.tick()
+    off.setTime(600_000)
+    off.service.tick()
+    expect(off.service.state().playback.status).toBe('playing')
   })
 })
 

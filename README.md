@@ -57,6 +57,7 @@ yt-dlp updates itself when the app starts and every 24 hours. `docker compose re
 | `TUNNEL_TOKEN` | unset | Cloudflare Tunnel token |
 | `CACHE_MAX_GB` | `2` | Soft cap for downloaded audio. The oldest songs that are not playing or queued are deleted first. |
 | `MAX_DURATION_MIN` | `60` | Longer videos are rejected |
+| `IDLE_PAUSE_MIN` | `5` | The station pauses for everyone after this many minutes with nobody joined, so songs and autoplay do not run for an empty room. It stays paused until someone presses Play. `0` turns this off. |
 | `YTDLP_COOKIES` | unset | Path inside the container to a cookies file. See below. |
 | `SYNC_LOG` | unset | `1` logs each device's sync status every 5 seconds |
 

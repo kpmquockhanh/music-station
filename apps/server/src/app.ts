@@ -60,6 +60,7 @@ export async function createApp(deps: AppDeps): Promise<App> {
       realtime?.broadcastActivity(text)
     },
     log,
+    idlePauseMs: config.idlePauseMs,
   })
   service.restore(await loadState(stateFile, log))
 

@@ -13,6 +13,7 @@ describe('loadConfig', () => {
       syncLog: false,
       cacheMaxBytes: 2 * 1024 ** 3,
       maxDurationSec: 3_600,
+      idlePauseMs: 300_000,
     })
   })
 
@@ -26,6 +27,7 @@ describe('loadConfig', () => {
       CLIENT_IP_HEADER: 'CF-Connecting-IP',
       CACHE_MAX_GB: '0.5',
       MAX_DURATION_MIN: '15',
+      IDLE_PAUSE_MIN: '0.5',
     })
     expect(c).toMatchObject({
       port: 4000,
@@ -36,6 +38,7 @@ describe('loadConfig', () => {
       clientIpHeader: 'cf-connecting-ip',
       cacheMaxBytes: 0.5 * 1024 ** 3,
       maxDurationSec: 900,
+      idlePauseMs: 30_000,
     })
   })
 
@@ -49,5 +52,10 @@ describe('loadConfig', () => {
   it('rejects invalid numbers', () => {
     expect(() => loadConfig({ CACHE_MAX_GB: 'lots' })).toThrow(/CACHE_MAX_GB/)
     expect(() => loadConfig({ MAX_DURATION_MIN: '-1' })).toThrow(/MAX_DURATION_MIN/)
+    expect(() => loadConfig({ IDLE_PAUSE_MIN: '-1' })).toThrow(/IDLE_PAUSE_MIN/)
+  })
+
+  it('turns the idle pause off with 0', () => {
+    expect(loadConfig({ IDLE_PAUSE_MIN: '0' }).idlePauseMs).toBe(0)
   })
 })

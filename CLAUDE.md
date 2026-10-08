@@ -40,11 +40,11 @@ Deploy: `docker compose up -d --build` on the Pi, or `scripts/deploy-pi.sh [--en
 
 **Server (`apps/server`)**, Fastify + socket.io, wired up in `app.ts`:
 - `Station` (`station.ts`) is the pure, synchronous state machine: queue, current song, playback, listeners, autoplay history. It throws `StationError` for user-facing rejections.
-- `StationService` (`service.ts`) wraps it with the side effects: yt-dlp info lookups, downloads through `AudioCache`, autoplay of related songs, and `onChange`/`onActivity` callbacks. `tick()` runs every 250 ms to hand off songs.
+- `StationService` (`service.ts`) wraps it with the side effects: yt-dlp info lookups, downloads through `AudioCache`, autoplay of related songs, and `onChange`/`onActivity` callbacks. `tick()` runs every 250 ms to hand off songs, and pauses the station after `IDLE_PAUSE_MIN` with nobody joined.
 - `realtime.ts` maps socket events to service calls. Every action (`queue:add|remove|move`, `player:play|pause|skip|seek`, `station:autoplay`) goes through `action()`, which checks for a join, rate-limits to one per 500 ms, validates against the shared zod schema, and replies `Ack`. Every change broadcasts the whole `state`. Listeners are keyed by a client UUID with a per-tab socket count, and they leave after a 10 s grace period. `time:ping` drives the client clock sync. `hello { webVersion }` makes open pages reload after a deploy.
 - `http.ts`: `/api/search` (30/min per IP, using `CLIENT_IP_HEADER` behind Cloudflare), `/audio/<videoId>.m4a` from the cache, and the built web UI when `WEB_DIR` is set.
 - `youtube.ts` builds yt-dlp/ffmpeg argument lists and parses their output, and `process.ts` runs them with timeouts and kills the whole process tree. AAC sources are copied as they are, because re-encoding adds clicks. `cache.ts` evicts the oldest files that are not playing or queued, above `CACHE_MAX_GB`. `persist.ts` debounces saves of `station.json` and also saves every 5 s while playing, so a crash loses little.
-- Config comes from env vars (`config.ts`): `PORT`, `DATA_DIR`, `WEB_DIR`, `YTDLP_BIN`, `YTDLP_COOKIES`, `CACHE_MAX_GB`, `MAX_DURATION_MIN`, `CLIENT_IP_HEADER`, `SYNC_LOG`.
+- Config comes from env vars (`config.ts`): `PORT`, `DATA_DIR`, `WEB_DIR`, `YTDLP_BIN`, `YTDLP_COOKIES`, `CACHE_MAX_GB`, `MAX_DURATION_MIN`, `IDLE_PAUSE_MIN`, `CLIENT_IP_HEADER`, `SYNC_LOG`.
 
 **Web (`apps/web`)**, React + Tailwind v4, with no router:
 - `useStation.ts` is the single hook that owns the socket, the state, toasts, joining (including `startupJoin` to skip the Join screen) and the player.

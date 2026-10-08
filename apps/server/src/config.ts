@@ -8,6 +8,8 @@ export interface Config {
   syncLog: boolean
   cacheMaxBytes: number
   maxDurationSec: number
+  /** The station pauses after this long with nobody joined. 0 turns it off. */
+  idlePauseMs: number
 }
 
 type Env = Record<string, string | undefined>
@@ -17,6 +19,14 @@ function positive(env: Env, name: string, fallback: number): number {
   if (raw === undefined || raw === '') return fallback
   const n = Number(raw)
   if (!Number.isFinite(n) || n <= 0) throw new Error(`${name} must be a positive number, got "${raw}"`)
+  return n
+}
+
+function nonNegative(env: Env, name: string, fallback: number): number {
+  const raw = env[name]
+  if (raw === undefined || raw === '') return fallback
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) throw new Error(`${name} must be 0 or more, got "${raw}"`)
   return n
 }
 
@@ -31,5 +41,6 @@ export function loadConfig(env: Env = process.env): Config {
     syncLog: env.SYNC_LOG === '1',
     cacheMaxBytes: positive(env, 'CACHE_MAX_GB', 2) * 1024 ** 3,
     maxDurationSec: positive(env, 'MAX_DURATION_MIN', 60) * 60,
+    idlePauseMs: nonNegative(env, 'IDLE_PAUSE_MIN', 5) * 60_000,
   }
 }

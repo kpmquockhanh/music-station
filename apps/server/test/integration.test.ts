@@ -27,6 +27,7 @@ const config = (): Config => ({
   syncLog: false,
   cacheMaxBytes: 1e9,
   maxDurationSec: 3_600,
+  idlePauseMs: 0,
 })
 
 const youtube = {

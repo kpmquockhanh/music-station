@@ -46,6 +46,15 @@ export class Station {
     return this.listeners.get(listenerId)
   }
 
+  hasListeners(): boolean {
+    return this.listeners.size > 0
+  }
+
+  /** Whether a song plays or waits for its download, so a pause would stop it. */
+  isRunning(): boolean {
+    return this.current !== null && this.playback.status !== 'paused'
+  }
+
   assertRoom(): void {
     if (this.queue.length >= MAX_QUEUE) throw new StationError('The queue is full')
   }

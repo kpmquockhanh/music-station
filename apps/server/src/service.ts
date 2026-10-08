@@ -29,6 +29,8 @@ export interface ServiceDeps {
   onChange(): void
   onActivity(text: string): void
   log?(msg: string): void
+  /** The station pauses after this long with nobody joined. 0 or missing turns it off. */
+  idlePauseMs?: number
 }
 
 /** After autoplay finds nothing, or YouTube fails, it waits this long before it tries again. */
@@ -52,6 +54,10 @@ export class StationService {
   private suggesting = false
   private suggestRetryAt = Number.NEGATIVE_INFINITY
   private relatedCache = new LRUCache<string, SearchResult[]>({ max: 20, ttl: 3_600_000 })
+  /** When the last listener left, or null while someone is joined. */
+  private emptySince: number | null = null
+  /** Set by the idle pause until someone plays again, so people who join learn why it stopped. */
+  private idlePaused = false
 
   constructor(private deps: ServiceDeps) {}
 
@@ -77,7 +83,9 @@ export class StationService {
   join(listenerId: string, nickname: string): void {
     const isNew = this.deps.station.nickname(listenerId) === undefined
     this.deps.station.join(listenerId, nickname)
+    this.emptySince = null
     if (isNew) this.deps.onActivity(`${nickname} joined`)
+    if (isNew && this.idlePaused) this.deps.onActivity(`Paused after ${this.idleMinutes()} with nobody listening`)
     this.changed()
   }
 
@@ -125,6 +133,7 @@ export class StationService {
   play(listenerId: string): void {
     const nickname = this.who(listenerId)
     this.deps.station.play(this.deps.now())
+    this.idlePaused = false
     this.announce(`${nickname} pressed play`)
   }
 
@@ -143,12 +152,32 @@ export class StationService {
   skip(listenerId: string): void {
     const nickname = this.who(listenerId)
     const item = this.deps.station.skip(this.deps.now())
+    this.idlePaused = false
     this.announce(`${nickname} skipped ${item.title}`)
   }
 
   tick(): void {
+    if (this.pauseWhenIdle()) return
     if (this.deps.station.tick(this.deps.now())) this.changed()
     else this.maybeSuggest() // retries after a failure, which no state change announces
+  }
+
+  /** Pauses for everyone once nobody has been joined for idlePauseMs, so songs and autoplay do not run for no one. */
+  private pauseWhenIdle(): boolean {
+    const { station, idlePauseMs = 0 } = this.deps
+    if (idlePauseMs <= 0 || station.hasListeners()) return false
+    const now = this.deps.now()
+    this.emptySince ??= now
+    if (now - this.emptySince < idlePauseMs || !station.isRunning()) return false
+    station.pause(now)
+    this.idlePaused = true
+    this.announce(`Paused after ${this.idleMinutes()} with nobody listening`)
+    return true
+  }
+
+  private idleMinutes(): string {
+    const min = Math.round(((this.deps.idlePauseMs ?? 0) / 60_000) * 10) / 10
+    return `${min} minute${min === 1 ? '' : 's'}`
   }
 
   private who(listenerId: string): string {

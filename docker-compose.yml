@@ -9,6 +9,7 @@ services:
     environment:
       CACHE_MAX_GB: ${CACHE_MAX_GB:-2}
       MAX_DURATION_MIN: ${MAX_DURATION_MIN:-60}
+      IDLE_PAUSE_MIN: ${IDLE_PAUSE_MIN:-5}
       YTDLP_COOKIES: ${YTDLP_COOKIES:-}
       SYNC_LOG: ${SYNC_LOG:-}
       # Cloudflare puts the visitor's real IP here, so each visitor keeps their own search limit behind the tunnel.
