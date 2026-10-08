@@ -98,7 +98,7 @@ The keyboard media keys control this computer only. **Pause** stops the sound he
 
 The app's screens update with every server deploy. A new installer is only needed for changes to the app itself.
 
-To publish installers, set `version` in `apps/desktop/package.json`, commit, and push a tag `desktop-v<version>`. GitHub Actions builds both installers and attaches them to a draft release. Publish the draft by hand.
+To publish installers, set `version` in `apps/desktop/package.json` and run `pnpm --filter @music-station/desktop dist` on a Mac for the `.dmg` and on Windows for the `.exe`. The installers land in `apps/desktop/release/`. Attach them to a release on GitHub by hand.
 
 ## Development
 
