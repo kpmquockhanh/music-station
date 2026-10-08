@@ -22,17 +22,19 @@ export function getDesktop(win: { desktop?: unknown } = window as unknown as { d
 
 /**
  * What the app's menu bar shows: the song and the station status while joined, otherwise null.
+ * `blocked` is whether this computer stopped while the station plays on.
  * Given the time, it adds the position, moved onto this computer's clock.
  */
 export function nowPlayingOf(
   state: StationState | null,
   joined: boolean,
+  blocked = false,
   clock?: { serverNow: number; localNow: number },
 ): NowPlaying | null {
   const current = state?.current
   if (!joined || !state || !current) return null
   const { title, channel, thumbnail, duration } = current
-  const info: NowPlaying = { title, channel, status: state.playback.status, thumbnail, duration }
+  const info: NowPlaying = { title, channel, status: state.playback.status, thumbnail, duration, stoppedHere: blocked }
   if (!clock) return info
   return { ...info, position: expectedPosition(state.playback, clock.serverNow), at: clock.localNow }
 }
@@ -42,16 +44,28 @@ export function reportNowPlaying(bridge: DesktopBridge | null, info: NowPlaying 
   if (typeof bridge?.nowPlaying === 'function') bridge.nowPlaying(info)
 }
 
-const ACTIONS: Record<DesktopCommand, ActionEvent> = { play: 'player:play', pause: 'player:pause', skip: 'player:skip' }
+const ACTIONS: Partial<Record<DesktopCommand, ActionEvent>> = { play: 'player:play', pause: 'player:pause', skip: 'player:skip' }
 
-/** Runs the app's tray commands as station actions. Returns the function that stops listening, or null. */
+/** What this computer does alone: stop, as when it goes to sleep, and start again. */
+export interface HereControls {
+  pauseHere(): void
+  resume(): void
+}
+
+/**
+ * Runs the app's tray commands: play, pause and skip as station actions, and pauseHere and resumeHere on this
+ * computer only. Returns the function that stops listening, or null.
+ */
 export function listenForCommands(
   bridge: DesktopBridge | null,
   send: (event: ActionEvent) => unknown,
+  here: HereControls,
 ): (() => void) | null {
   if (typeof bridge?.onCommand !== 'function') return null
   const stop = bridge.onCommand((command) => {
-    if (Object.hasOwn(ACTIONS, command)) void send(ACTIONS[command])
+    if (command === 'pauseHere') here.pauseHere()
+    else if (command === 'resumeHere') here.resume()
+    else if (Object.hasOwn(ACTIONS, command)) void send(ACTIONS[command]!)
   })
   return typeof stop === 'function' ? stop : null
 }
@@ -95,15 +109,15 @@ export function listenForRequests(bridge: DesktopBridge | null, send: Send): (()
 /** Reports the song to the desktop app and runs its tray commands as station actions. Does nothing in a browser. */
 export function useDesktopBridge(station: Station): void {
   // A string key, so a new state object with the same song, status and playback sends nothing.
-  const key = JSON.stringify([nowPlayingOf(station.state, station.joined), station.state?.playback])
-  const { send, serverNow } = station
+  const key = JSON.stringify([nowPlayingOf(station.state, station.joined, station.blocked), station.state?.playback])
+  const { send, serverNow, pauseHere, resume } = station
   const latest = useRef(station)
   latest.current = station
   useEffect(() => {
-    const { state, joined } = latest.current
-    reportNowPlaying(getDesktop(), nowPlayingOf(state, joined, { serverNow: serverNow(), localNow: Date.now() }))
+    const { state, joined, blocked } = latest.current
+    reportNowPlaying(getDesktop(), nowPlayingOf(state, joined, blocked, { serverNow: serverNow(), localNow: Date.now() }))
   }, [key, serverNow])
-  useEffect(() => listenForCommands(getDesktop(), send) ?? undefined, [send])
+  useEffect(() => listenForCommands(getDesktop(), send, { pauseHere, resume }) ?? undefined, [send, pauseHere, resume])
   const upNextKey = JSON.stringify(upNextOf(station.state, station.joined))
   useEffect(() => reportUpNext(getDesktop(), upNextOf(latest.current.state, latest.current.joined)), [upNextKey])
   useEffect(() => listenForRequests(getDesktop(), send) ?? undefined, [send])

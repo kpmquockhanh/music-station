@@ -27,6 +27,7 @@ A desktop app for Mac and Windows that listens to the station like the web page 
 | App updates | None for the app itself; the UI updates with every deploy | electron-updater, which needs signing on macOS |
 | Media keys and lock screen | Pause stops this device only and Play rejoins it, like the existing outside-pause rule (R12). Next skips the song for everyone. | Station-wide pause: taking out AirPods or disconnecting headphones sends the system a pause, which would then stop the music for everyone |
 | Menu-bar controls | Station-wide: "Pause for everyone", "Play for everyone", "Skip for everyone" | Local controls, which the window banner already covers |
+| Sleep | The computer stops this device only when it goes to sleep, and stays silent after it wakes until someone taps Resume in the card or the tray menu | Playing on at wake: a laptop opened in a meeting or a library would start playing out loud |
 
 ## 3. Scope
 
@@ -188,10 +189,12 @@ Browsers keep the Join screen and its Listen tap, which iOS needs to unlock audi
 
 **Tray menu.**
 - A disabled first line shows `title — channel`, or "Nothing playing".
+- Then "Resume on this computer" while this computer is stopped and the station plays on, as after sleep (`stoppedHere` in `nowPlaying`). It sends `resumeHere`.
 - Then "Pause for everyone" when the status is `playing`, otherwise "Play for everyone". It is disabled with nothing current, and while the status is `waiting` (the song is still downloading).
 - Then "Skip for everyone", disabled with nothing current.
 - Then a separator, "Show window", "Change station…", and "Quit".
-- On Mac the menu bar shows the time left beside the icon, or "Paused" or "Loading". A right-click opens the menu above. A click opens a card under the icon, like a live activity, with:
+- On Mac the menu bar shows the time left beside the icon, or "Paused", "Loading", or "Stopped" while this computer is stopped. A right-click opens the menu above. A click opens a card under the icon, like a live activity, with:
+  - a "Tap to resume" banner at the top while this computer is stopped and the station plays on, as after sleep. A tap sends `resumeHere`, and the page rejoins at the shared position;
   - the song, the channel and the time left, and the thumbnail;
   - a progress bar that moves smoothly while the song plays;
   - "Ends at" a time on this computer's clock while playing;
@@ -202,6 +205,12 @@ Browsers keep the Join screen and its Listen tap, which iOS needs to unlock audi
 - The card cannot reach the station itself. The page sends its queue with `upNext`, and answers the card's searches and adds with `onRequest`. The app checks both, since the page is a remote site, and gives up on an answer after 30 seconds. A station page without `onRequest` gets a card without the search box and the list.
 - The station page's header also has play or pause and skip buttons while a song is current, in the app and in browsers.
 - The menu is rebuilt on every `nowPlaying` message.
+
+**Sleep.**
+- When the computer goes to sleep (`powerMonitor` `suspend`, on Mac and Windows), the app sends the page the `pauseHere` command. The page calls `station.pauseHere()`, the same as the Pause media key, so only this computer stops and the window shows the "Tap to resume audio" banner. Nothing happens while the station is paused.
+- The page reports `stoppedHere: true` in `nowPlaying` until it resumes. The tray menu, the menu-bar title and the card show it as above.
+- `resumeHere` calls `station.resume()`, which also measures the clock again, since a Mac's page clock stands still during sleep.
+- Pages older than these commands ignore them, and apps older than `stoppedHere` drop it.
 
 **Change station.**
 - Opens a small window (`station.html`) with one address field filled with the current URL, plus Save and Cancel.

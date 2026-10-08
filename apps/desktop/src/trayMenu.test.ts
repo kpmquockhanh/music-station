@@ -48,6 +48,16 @@ describe('trayMenu', () => {
     ])
   })
 
+  it('offers to resume this computer after it stopped, as after sleep', () => {
+    expect(lines(trayMenu({ ...song('playing'), stoppedHere: true }))).toEqual([
+      'Song — Band (off)',
+      'Resume on this computer [resumeHere]',
+      'Pause for everyone [pause]',
+      'Skip for everyone [skip]',
+      ...tail,
+    ])
+  })
+
   it('disables the station controls with nothing playing', () => {
     expect(lines(trayMenu(null))).toEqual([
       'Nothing playing (off)',
@@ -71,6 +81,10 @@ describe('menuBarTitle', () => {
     expect(menuBarTitle(timed('paused'), 99_000)).toBe('Paused')
     expect(menuBarTitle(timed('waiting'), 99_000)).toBe('Loading')
     expect(menuBarTitle(null, 0)).toBe('')
+  })
+
+  it('says Stopped while this computer is silent and the station plays on', () => {
+    expect(menuBarTitle({ ...timed('playing'), stoppedHere: true }, 1_000)).toBe('Stopped')
   })
 
   it('shows nothing while playing for a page that sends no timing', () => {
@@ -98,6 +112,7 @@ describe('cardView', () => {
       footer: 'Ends at @151000',
       toggle: { command: 'pause', label: 'Pause for everyone', enabled: true },
       canSkip: true,
+      resume: false,
       queue: null,
     })
   })
@@ -110,6 +125,10 @@ describe('cardView', () => {
       footer: '0:50 of 3:20',
       toggle: { command: 'play', label: 'Play for everyone', enabled: true },
     })
+  })
+
+  it('shows Tap to resume while this computer is stopped', () => {
+    expect(cardView({ ...timed('playing'), stoppedHere: true }, 11_000, at)).toMatchObject({ resume: true, subtitle: 'Band • 2:20 left' })
   })
 
   it('turns play off while the song downloads', () => {
@@ -135,6 +154,7 @@ describe('cardView', () => {
       footer: '',
       toggle: { command: 'play', label: 'Play for everyone', enabled: false },
       canSkip: false,
+      resume: false,
       queue: null,
     })
   })
@@ -204,6 +224,13 @@ describe('parseNowPlaying', () => {
     expect(parseNowPlaying({ ...base, duration: 200, position: -1, at: 1 })).toEqual({ ...clean, duration: 200 })
     expect(parseNowPlaying({ ...base, duration: 200, position: 1, at: Number.NaN })).toEqual({ ...clean, duration: 200 })
     expect(parseNowPlaying({ ...base, duration: '200' })).toEqual(clean)
+  })
+
+  it('keeps stoppedHere only when it is true', () => {
+    const base = { title: 'Song', channel: 'Band', status: 'playing' }
+    expect(parseNowPlaying({ ...base, stoppedHere: true })).toEqual({ ...base, stoppedHere: true })
+    expect(parseNowPlaying({ ...base, stoppedHere: false })).toEqual(base)
+    expect(parseNowPlaying({ ...base, stoppedHere: 'yes' })).toEqual(base)
   })
 
   it('accepts a valid message and drops extra fields', () => {

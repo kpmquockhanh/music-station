@@ -7,6 +7,7 @@ import {
   Menu,
   nativeImage,
   net,
+  powerMonitor,
   screen,
   session,
   shell,
@@ -76,6 +77,8 @@ function start(): void {
   listenToPages()
   createWindow()
   createTray()
+  // A sleeping computer stops here only, and stays silent after it wakes until someone taps Resume.
+  powerMonitor.on('suspend', () => win?.webContents.send('desktop:command', 'pauseHere'))
 }
 
 function webPreferences(extra: WebPreferences = {}): WebPreferences {
@@ -356,7 +359,8 @@ function listenToPages(): void {
     return true
   })
   ipcMain.on('local:command', (event, command: unknown) => {
-    if (fromLocalPage(event) && (command === 'play' || command === 'pause' || command === 'skip')) {
+    const known = command === 'play' || command === 'pause' || command === 'skip' || command === 'resumeHere'
+    if (fromLocalPage(event) && known) {
       win?.webContents.send('desktop:command', command)
     }
   })

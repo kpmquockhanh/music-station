@@ -325,7 +325,10 @@ export function useStation(): Station {
 
   const resume = useCallback(() => {
     setBlocked(false)
-    conn.current?.player.resume()
+    const c = conn.current
+    c?.player.resume()
+    // A Mac's page clock stands still while it sleeps, so measure again; the player then moves to the new time.
+    void c?.clock.measure()
   }, [])
 
   const pauseHere = useCallback(() => conn.current?.player.pauseHere(), [])

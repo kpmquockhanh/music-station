@@ -49,6 +49,16 @@
   button svg, button .spinner { width: 14px; height: 14px; fill: currentColor; pointer-events: none; }
   button:focus-visible { outline: 2px solid var(--fill); outline-offset: 2px; }
 
+  /* Tap to resume: this computer stopped, as after sleep, while the station plays on */
+  .resume { width: auto; height: auto; display: flex; align-items: center; gap: 12px; margin: 10px 10px 0; padding: 10px 12px;
+            border-radius: 14px; background: #fbbf24; color: #18181b; text-align: left; }
+  .resume:hover { background: #f59e0b; }
+  .resume:focus-visible { outline-color: #f59e0b; }
+  .resume .icon { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 50%; background: rgb(0 0 0 / .1); }
+  .resume svg { width: 18px; height: 18px; }
+  .resume b { display: block; font-size: 14px; font-weight: 700; }
+  .resume small { display: block; font-size: 12px; opacity: .8; }
+
   /* Add songs, and Up next */
   .queue { border-top: 1px solid var(--line); padding: 12px 12px 10px; display: flex; flex-direction: column; gap: 8px; }
   .search { position: relative; display: flex; align-items: center; margin: 0 4px; }
@@ -96,6 +106,10 @@
 </head>
 <body>
 <main class="card" id="card">
+  <button class="resume" id="resume" type="button" hidden>
+    <span class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 9.2h3.6L11.5 5v14l-4.4-4.2H3.5z"/><path d="M15 8.6a4.8 4.8 0 0 1 0 6.8M17.8 5.8a8.8 8.8 0 0 1 0 12.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+    <span><b>Tap to resume</b><small>Music stopped on this computer. The station kept playing.</small></span>
+  </button>
   <section class="now" id="now" title="Show the Music Station window">
     <div class="brand">
       <svg viewBox="4 4 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M9 20v-6M14 23V9M19 20v-8M24 18v-4"/></svg>
@@ -195,6 +209,7 @@
     toggle.title = view.toggle.label
     toggle.disabled = !view.toggle.enabled
     $('skip').disabled = !view.canSkip
+    $('resume').hidden = !view.resume
     $('queue').hidden = view.queue === null
     if (!results) showQueue()
   }
@@ -362,6 +377,10 @@
   $('skip').addEventListener('click', (e) => {
     e.stopPropagation()
     window.desktopLocal?.command('skip')
+  })
+  $('resume').addEventListener('click', () => {
+    $('resume').hidden = true // the page's next update confirms it
+    window.desktopLocal?.command('resumeHere')
   })
   // The song part of the card opens the window, like a notification.
   $('now').addEventListener('click', () => window.desktopLocal?.showWindow())

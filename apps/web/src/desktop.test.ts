@@ -42,17 +42,22 @@ describe('nowPlayingOf', () => {
         status,
         thumbnail: song.thumbnail,
         duration: 200,
+        stoppedHere: false,
       })
     }
+  })
+
+  it('says when this computer stopped while the station plays on', () => {
+    expect(nowPlayingOf(stateWith(song), true, true)).toMatchObject({ status: 'playing', stoppedHere: true })
   })
 
   it('adds the position on this computer\'s clock when given the time', () => {
     const state = stateWith(song, 'playing')
     state.playback = { status: 'playing', position: 30, at: 10_000 }
     // 5 s after the server's position, read at 99_000 on this computer.
-    expect(nowPlayingOf(state, true, { serverNow: 15_000, localNow: 99_000 })).toMatchObject({ position: 35, at: 99_000 })
+    expect(nowPlayingOf(state, true, false, { serverNow: 15_000, localNow: 99_000 })).toMatchObject({ position: 35, at: 99_000 })
     state.playback = { status: 'paused', position: 30, at: 10_000 }
-    expect(nowPlayingOf(state, true, { serverNow: 15_000, localNow: 99_000 })).toMatchObject({ position: 30, at: 99_000 })
+    expect(nowPlayingOf(state, true, false, { serverNow: 15_000, localNow: 99_000 })).toMatchObject({ position: 30, at: 99_000 })
   })
 
   it('is null before joining, before the first state, and with nothing current', () => {
@@ -92,20 +97,34 @@ describe('listenForCommands', () => {
     return { bridge, stop, press: (command: string) => listener?.(command as DesktopCommand) }
   }
 
+  const fakeHere = () => ({ pauseHere: vi.fn(), resume: vi.fn() })
+
   it('sends each tray command as its station action', () => {
     const { bridge, press } = fakeBridge()
     const send = vi.fn()
-    listenForCommands(bridge, send)
+    listenForCommands(bridge, send, fakeHere())
     press('play')
     press('pause')
     press('skip')
     expect(send.mock.calls).toEqual([['player:play'], ['player:pause'], ['player:skip']])
   })
 
+  it('stops and resumes this computer only for pauseHere and resumeHere', () => {
+    const { bridge, press } = fakeBridge()
+    const send = vi.fn()
+    const here = fakeHere()
+    listenForCommands(bridge, send, here)
+    press('pauseHere') // the computer goes to sleep
+    expect(here.pauseHere).toHaveBeenCalledOnce()
+    press('resumeHere') // Tap to resume in the card
+    expect(here.resume).toHaveBeenCalledOnce()
+    expect(send).not.toHaveBeenCalled()
+  })
+
   it('ignores commands it does not know, including inherited property names', () => {
     const { bridge, press } = fakeBridge()
     const send = vi.fn()
-    listenForCommands(bridge, send)
+    listenForCommands(bridge, send, fakeHere())
     press('toString')
     press('constructor')
     press('seek')
@@ -115,7 +134,7 @@ describe('listenForCommands', () => {
   it('returns the function that stops listening', () => {
     const { bridge, stop, press } = fakeBridge()
     const send = vi.fn()
-    const unsubscribe = listenForCommands(bridge, send)
+    const unsubscribe = listenForCommands(bridge, send, fakeHere())
     unsubscribe?.()
     expect(stop).toHaveBeenCalledOnce()
     press('play')
@@ -123,8 +142,8 @@ describe('listenForCommands', () => {
   })
 
   it('returns null without a bridge, or with one that lacks onCommand', () => {
-    expect(listenForCommands(null, vi.fn())).toBeNull()
-    expect(listenForCommands({}, vi.fn())).toBeNull()
+    expect(listenForCommands(null, vi.fn(), fakeHere())).toBeNull()
+    expect(listenForCommands({}, vi.fn(), fakeHere())).toBeNull()
   })
 })
 

@@ -82,7 +82,7 @@ export function App() {
             </span>
             <span className="flex flex-col">
               <span className="font-display font-semibold">Tap to resume audio</span>
-              <span className="text-sm opacity-80">Your browser paused the sound. The station kept playing.</span>
+              <span className="text-sm opacity-80">The sound stopped on this device. The station kept playing.</span>
             </span>
           </button>
         )}

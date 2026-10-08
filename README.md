@@ -96,6 +96,8 @@ The app opens `https://music.devxdev.site`. To use another station, choose **Cha
 
 The keyboard media keys control this computer only. **Pause** stops the sound here while the station keeps playing for everyone else, and **Play** rejoins at the shared position. **Next**, like a headset's next button, skips the song for everyone.
 
+When the computer goes to sleep, the music stops on it and stays stopped after it wakes. Click **Tap to resume** in the menu-bar card (Mac) or **Resume on this computer** in the tray menu (Windows) to rejoin.
+
 The app's screens update with every server deploy. A new installer is only needed for changes to the app itself.
 
 To publish installers, set `version` in `apps/desktop/package.json` and run `pnpm --filter @music-station/desktop dist` on a Mac for the `.dmg` and on Windows for the `.exe`. The installers land in `apps/desktop/release/`. Attach them to a release on GitHub by hand.

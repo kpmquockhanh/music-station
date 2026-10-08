@@ -28,6 +28,7 @@ export function trayMenu(info: NowPlaying | null): TrayItem[] {
   const playing = info?.status === 'playing'
   return [
     { label: songLine(info), enabled: false },
+    ...(info?.stoppedHere ? [{ label: 'Resume on this computer', enabled: true, command: 'resumeHere' as const }] : []),
     {
       label: playing ? 'Pause for everyone' : 'Play for everyone',
       // While the song downloads, the server cannot play or pause it yet.
@@ -61,6 +62,7 @@ export function menuBarTitle(info: NowPlaying | null, now: number): string {
   if (!info) return ''
   if (info.status === 'paused') return 'Paused'
   if (info.status === 'waiting') return 'Loading'
+  if (info.stoppedHere) return 'Stopped' // the station plays on, so a countdown would hide that this computer is silent
   const position = positionAt(info, now)
   return position === null || info.duration === undefined ? '' : clock(info.duration - position)
 }
@@ -77,6 +79,8 @@ export interface CardView {
   footer: string
   toggle: { command: 'play' | 'pause'; label: string; enabled: boolean }
   canSkip: boolean
+  /** Shows "Tap to resume": this computer stopped, as after sleep, while the station plays on. */
+  resume: boolean
   /** The search box and the Up next list, or null for a station page that cannot answer the card. */
   queue: { rows: UpNextRow[]; more: number } | null
 }
@@ -119,6 +123,7 @@ export function cardView(
       footer: '',
       toggle: { command: 'play', label: 'Play for everyone', enabled: false },
       canSkip: false,
+      resume: false,
       queue,
     }
   }
@@ -155,6 +160,7 @@ export function cardView(
       enabled: info.status !== 'waiting',
     },
     canSkip: true,
+    resume: info.stoppedHere === true,
     queue,
   }
 }
@@ -214,6 +220,7 @@ export function parseNowPlaying(value: unknown): NowPlaying | null {
   const { thumbnail, duration, position, at } = value as Record<string, unknown>
   // The card shows the thumbnail as an image, so only a web address will do.
   if (typeof thumbnail === 'string' && thumbnail.startsWith('https://')) info.thumbnail = thumbnail
+  if ((value as Record<string, unknown>).stoppedHere === true) info.stoppedHere = true
   const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n)
   if (finite(duration) && duration > 0) {
     info.duration = duration
