@@ -1,11 +1,45 @@
-import type { Playback } from './types'
+import type { Playback, QueueItemStatus, SearchResult } from './types'
 
-/** The song the desktop app's tray menu shows. */
+/** The song the desktop app's menu bar shows. The optional fields are missing from pages older than them. */
 export interface NowPlaying {
   title: string
   channel: string
   status: Playback['status']
+  thumbnail?: string
+  /** Seconds. */
+  duration?: number
+  /** Seconds into the song at `at`, a time on this computer's clock in ms. While playing it moves on from there. */
+  position?: number
+  at?: number
 }
+
+/** A song in the card's Up next list. */
+export interface UpNextSong {
+  title: string
+  /** Seconds. */
+  duration: number
+  thumbnail: string
+  addedBy: string
+  status: QueueItemStatus
+}
+
+/** The queue the card shows: its first songs and how many there are in all. */
+export interface UpNext {
+  songs: UpNextSong[]
+  total: number
+}
+
+/** The most songs the page sends; the window shows the rest. */
+export const UP_NEXT_LIMIT = 20
+
+/**
+ * What the menu-bar card asks the page to do, since only the page talks to the station.
+ * `submit` is the search box: a YouTube link adds the video, other text searches. `add` adds a search result.
+ */
+export type DesktopRequest = { kind: 'submit'; text: string } | { kind: 'add'; videoId: string }
+
+/** The page's answer. A search answers with its results, and an add with none. */
+export type DesktopReply = { ok: true; results?: SearchResult[] } | { ok: false; error: string }
 
 /** A tray command, which the page sends as the station action of the same name. */
 export type DesktopCommand = 'play' | 'pause' | 'skip'
@@ -19,4 +53,8 @@ export interface DesktopBridge {
   nowPlaying?(info: NowPlaying | null): void
   /** Returns a function that stops listening. */
   onCommand?(fn: (command: DesktopCommand) => void): () => void
+  /** null while not joined. */
+  upNext?(queue: UpNext | null): void
+  /** Answers the card's requests. Returns a function that stops listening. */
+  onRequest?(fn: (request: DesktopRequest) => Promise<DesktopReply>): () => void
 }

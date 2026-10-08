@@ -35,6 +35,9 @@ export function App() {
     )
   }
 
+  // Like the Now playing card: pausing while the song downloads is allowed.
+  const paused = state.playback.status === 'paused'
+
   return (
     <div className="min-h-dvh pb-[max(env(safe-area-inset-bottom),2rem)]">
       <header className="sticky top-0 z-30 border-b border-line/60 bg-canvas/80 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
@@ -52,6 +55,17 @@ export function App() {
           >
             <AvatarStack listeners={state.listeners} />
           </button>
+          {state.current && (
+            <>
+              <IconButton
+                label={paused ? 'Play' : 'Pause'}
+                icon={paused ? 'play' : 'pause'}
+                onClick={() => void station.send(paused ? 'player:play' : 'player:pause')}
+                disabled={paused && state.current.status !== 'ready'}
+              />
+              <IconButton label="Skip" icon="skip" onClick={() => void station.send('player:skip')} />
+            </>
+          )}
           <IconButton label="Settings" icon="sliders" onClick={() => setSettingsOpen(true)} />
         </div>
       </header>

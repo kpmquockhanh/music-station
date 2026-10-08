@@ -85,7 +85,7 @@ If a device shows **Tap to resume audio**, its browser blocked playback or the p
 
 ## Desktop app
 
-Music Station also runs as an app on Mac and Windows. It opens the station in its own window, joins with your saved nickname, and keeps playing when you close the window. The menu bar (Mac) or tray (Windows) icon shows the song playing now and has **Pause for everyone**, **Play for everyone** and **Skip for everyone**.
+Music Station also runs as an app on Mac and Windows. It opens the station in its own window, joins with your saved nickname, and keeps playing when you close the window. The menu bar (Mac) or tray (Windows) icon shows the song playing now and has **Pause for everyone**, **Play for everyone** and **Skip for everyone**. On Mac, clicking the menu-bar icon opens a card with the song, a box to search or paste a YouTube link, and Up next.
 
 Download the latest installer from the [Releases page](https://github.com/kpmquockhanh/music-station/releases): `Music-Station-<version>-mac.dmg` or `Music-Station-<version>-windows.exe`. The apps are not signed, so the first launch takes one extra step:
 

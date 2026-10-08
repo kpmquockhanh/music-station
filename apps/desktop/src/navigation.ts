@@ -11,14 +11,14 @@ export function navigationFor(url: string, station: string): 'allow' | 'external
 }
 
 /**
- * True for the app's own pages, which alone may retry or change the station. The windows can never navigate to a
+ * True for the app's own pages, which alone may retry or change the station and send the menu-bar card's commands. The windows can never navigate to a
  * file: URL (navigationFor refuses them), so the path's ending is enough; an exact path would have to match how
  * Chromium spells drive letters and non-ASCII folder names.
  */
 export function isLocalPage(url: string): boolean {
   try {
     const u = new URL(url)
-    return u.protocol === 'file:' && /\/pages\/(offline|station)\.html$/.test(u.pathname)
+    return u.protocol === 'file:' && /\/pages\/(offline|station|card)\.html$/.test(u.pathname)
   } catch {
     return false
   }

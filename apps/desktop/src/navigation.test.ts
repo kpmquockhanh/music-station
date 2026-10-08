@@ -48,6 +48,7 @@ describe('isLocalPage', () => {
     'file:///Applications/Music%20Station.app/Contents/Resources/app.asar/pages/offline.html?station=https%3A%2F%2Fmusic.devxdev.site',
     'file:///C:/Users/Minh/AppData/Local/Programs/Music%20Station/resources/app.asar/pages/station.html?station=x',
     'file:///Users/minh/code/music-station/apps/desktop/pages/offline.html',
+    'file:///Applications/Music%20Station.app/Contents/Resources/app.asar/pages/card.html',
   ])('accepts the app page %s', (url) => {
     expect(isLocalPage(url)).toBe(true)
   })
@@ -56,6 +57,7 @@ describe('isLocalPage', () => {
     'https://music.devxdev.site/pages/offline.html',
     'https://music.devxdev.site/',
     'file:///Users/minh/Downloads/offline.html',
+    'file:///Users/minh/Downloads/card.html',
     'file:///etc/hosts',
     'file:///pages/offline.html.evil',
     '',

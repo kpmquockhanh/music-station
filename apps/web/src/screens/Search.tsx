@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react'
 import type { SearchResult } from '@music-station/shared'
 import { classifyInput, formatTime } from '../format'
+import { searchSongs } from '../search'
 import { Icon } from '../ui'
 import type { Station } from '../useStation'
 
@@ -36,17 +37,14 @@ export function Search({ send, notify }: Props) {
         if (res.ok) setText('')
         return
       }
-      const res = await fetch(`/api/search?q=${encodeURIComponent(input.query)}`)
-      const body = (await res.json()) as { results?: SearchResult[]; error?: string }
-      if (!res.ok) {
-        notify(res.status === 429 ? 'Too many searches. Wait a minute.' : (body.error ?? 'Search failed'), 'error')
+      const found = await searchSongs(input.query)
+      if (!found.ok) {
+        notify(found.error, 'error')
         return
       }
-      setResults(body.results ?? [])
+      setResults(found.results)
       setQuery(input.query)
       setAdded(new Set())
-    } catch {
-      notify('Search failed. Check your connection.', 'error')
     } finally {
       setBusy(false)
     }

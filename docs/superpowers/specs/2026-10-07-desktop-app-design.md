@@ -180,6 +180,7 @@ Browsers keep the Join screen and its Listen tap, which iOS needs to unlock audi
 - Loads the station URL from `settings.json`.
 
 **Window.**
+- On Mac the window has no title bar. The traffic lights sit in the page's header, and the app injects CSS that makes the header and a top strip drag the window and keeps the logo clear of the lights.
 - Closing the window hides it while the music plays on.
 - On Mac, the Dock icon shows it again; on Windows, clicking the tray icon does.
 - Quit, from the tray, the app menu or ⌘Q, really exits.
@@ -190,6 +191,16 @@ Browsers keep the Join screen and its Listen tap, which iOS needs to unlock audi
 - Then "Pause for everyone" when the status is `playing`, otherwise "Play for everyone". It is disabled with nothing current, and while the status is `waiting` (the song is still downloading).
 - Then "Skip for everyone", disabled with nothing current.
 - Then a separator, "Show window", "Change station…", and "Quit".
+- On Mac the menu bar shows the time left beside the icon, or "Paused" or "Loading". A right-click opens the menu above. A click opens a card under the icon, like a live activity, with:
+  - the song, the channel and the time left, and the thumbnail;
+  - a progress bar that moves smoothly while the song plays;
+  - "Ends at" a time on this computer's clock while playing;
+  - play or pause and skip buttons, with the same rules as the menu;
+  - a box to search for songs or paste a YouTube link. Return adds a link to Up next at once, or searches and lists the results, each with an add button, until Done or Escape;
+  - Up next: the first 20 songs in the queue with their length, who added them and whether they are getting ready or failed, then how many more there are.
+  A click on the song part of the card shows the window. A click elsewhere or Escape hides it; with a search open, Escape first clears it. The card grows with its list, up to the bottom of the screen. The page sends the song's length and position for this, and the position is on this computer's clock.
+- The card cannot reach the station itself. The page sends its queue with `upNext`, and answers the card's searches and adds with `onRequest`. The app checks both, since the page is a remote site, and gives up on an answer after 30 seconds. A station page without `onRequest` gets a card without the search box and the list.
+- The station page's header also has play or pause and skip buttons while a song is current, in the app and in browsers.
 - The menu is rebuilt on every `nowPlaying` message.
 
 **Change station.**

@@ -1,5 +1,17 @@
-import { useEffect } from 'react'
-import type { DesktopBridge, DesktopCommand, NowPlaying, StationState } from '@music-station/shared'
+import { useEffect, useRef } from 'react'
+import {
+  expectedPosition,
+  UP_NEXT_LIMIT,
+  type DesktopBridge,
+  type DesktopCommand,
+  type DesktopReply,
+  type DesktopRequest,
+  type NowPlaying,
+  type StationState,
+  type UpNext,
+} from '@music-station/shared'
+import { classifyInput } from './format'
+import { searchSongs } from './search'
 import type { ActionEvent, Station } from './useStation'
 
 /** The bridge inside the desktop app, otherwise null. */
@@ -8,11 +20,21 @@ export function getDesktop(win: { desktop?: unknown } = window as unknown as { d
   return typeof desktop === 'object' && desktop !== null ? (desktop as DesktopBridge) : null
 }
 
-/** What the app's tray shows: the song and the station status while joined, otherwise null. */
-export function nowPlayingOf(state: StationState | null, joined: boolean): NowPlaying | null {
+/**
+ * What the app's menu bar shows: the song and the station status while joined, otherwise null.
+ * Given the time, it adds the position, moved onto this computer's clock.
+ */
+export function nowPlayingOf(
+  state: StationState | null,
+  joined: boolean,
+  clock?: { serverNow: number; localNow: number },
+): NowPlaying | null {
   const current = state?.current
   if (!joined || !state || !current) return null
-  return { title: current.title, channel: current.channel, status: state.playback.status }
+  const { title, channel, thumbnail, duration } = current
+  const info: NowPlaying = { title, channel, status: state.playback.status, thumbnail, duration }
+  if (!clock) return info
+  return { ...info, position: expectedPosition(state.playback, clock.serverNow), at: clock.localNow }
 }
 
 /** Sends the song to an app whose bridge can take it. */
@@ -34,13 +56,55 @@ export function listenForCommands(
   return typeof stop === 'function' ? stop : null
 }
 
+/** The queue the app's menu-bar card shows while joined, otherwise null. */
+export function upNextOf(state: StationState | null, joined: boolean): UpNext | null {
+  if (!joined || !state) return null
+  const songs = state.queue
+    .slice(0, UP_NEXT_LIMIT)
+    .map(({ title, duration, thumbnail, addedBy, status }) => ({ title, duration, thumbnail, addedBy, status }))
+  return { songs, total: state.queue.length }
+}
+
+/** Sends the queue to an app whose bridge can take it. */
+export function reportUpNext(bridge: DesktopBridge | null, upNext: UpNext | null): void {
+  if (typeof bridge?.upNext === 'function') bridge.upNext(upNext)
+}
+
+type Send = (event: ActionEvent, payload?: object) => Promise<{ ok: true } | { ok: false; error: string }>
+
+/** Does what the menu-bar card asks, as the Search box does. Anything that is not a request gets an error. */
+export async function answerRequest(request: DesktopRequest, send: Send, search = searchSongs): Promise<DesktopReply> {
+  if (request?.kind === 'add' && typeof request.videoId === 'string') {
+    return send('queue:add', { input: request.videoId })
+  }
+  if (request?.kind !== 'submit' || typeof request.text !== 'string') return { ok: false, error: 'Unknown request' }
+  const input = classifyInput(request.text)
+  if (input.kind === 'empty') return { ok: false, error: 'Type a song name or paste a YouTube link' }
+  if (input.kind === 'bad-link') return { ok: false, error: 'That link has no YouTube video in it' }
+  if (input.kind === 'link') return send('queue:add', { input: input.videoId })
+  return search(input.query)
+}
+
+/** Answers the app's card requests. Returns the function that stops listening, or null. */
+export function listenForRequests(bridge: DesktopBridge | null, send: Send): (() => void) | null {
+  if (typeof bridge?.onRequest !== 'function') return null
+  const stop = bridge.onRequest((request) => answerRequest(request, send))
+  return typeof stop === 'function' ? stop : null
+}
+
 /** Reports the song to the desktop app and runs its tray commands as station actions. Does nothing in a browser. */
 export function useDesktopBridge(station: Station): void {
-  // A string key, so a new state object with the same song and status sends nothing.
-  const key = JSON.stringify(nowPlayingOf(station.state, station.joined))
-  const { send } = station
+  // A string key, so a new state object with the same song, status and playback sends nothing.
+  const key = JSON.stringify([nowPlayingOf(station.state, station.joined), station.state?.playback])
+  const { send, serverNow } = station
+  const latest = useRef(station)
+  latest.current = station
   useEffect(() => {
-    reportNowPlaying(getDesktop(), JSON.parse(key) as NowPlaying | null)
-  }, [key])
+    const { state, joined } = latest.current
+    reportNowPlaying(getDesktop(), nowPlayingOf(state, joined, { serverNow: serverNow(), localNow: Date.now() }))
+  }, [key, serverNow])
   useEffect(() => listenForCommands(getDesktop(), send) ?? undefined, [send])
+  const upNextKey = JSON.stringify(upNextOf(station.state, station.joined))
+  useEffect(() => reportUpNext(getDesktop(), upNextOf(latest.current.state, latest.current.joined)), [upNextKey])
+  useEffect(() => listenForRequests(getDesktop(), send) ?? undefined, [send])
 }

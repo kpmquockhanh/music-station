@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src https:">
+<title>Music Station</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --card: #ffffff; --ink: #0a0a0a; --muted: #3f3f46; --faint: #71717a;
+    --track: #5f5f5f; --fill: #22a447; --button: #f4f4f5; --button-hover: #e4e4e7; --line: rgb(0 0 0 / .08);
+    --warn: #b45309; --danger: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --card: #1c1c22; --ink: #fafafa; --muted: #d4d4d8; --faint: #a1a1aa;
+      --track: #4a4a52; --fill: #22c55e; --button: #2a2a33; --button-hover: #363641; --line: rgb(255 255 255 / .08);
+      --warn: #fbbf24; --danger: #f87171;
+    }
+  }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: transparent; overflow: hidden; user-select: none; -webkit-user-select: none; }
+  body { font: 15px/1.35 -apple-system, system-ui, sans-serif; color: var(--ink); }
+  .card { box-sizing: border-box; border-radius: 22px; background: var(--card); box-shadow: inset 0 0 0 1px var(--line);
+          display: flex; flex-direction: column; cursor: default; overflow: hidden; }
+
+  /* The song */
+  .now { display: flex; flex-direction: column; min-height: 174px; box-sizing: border-box; padding: 16px 20px 15px; }
+  .brand { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: -.01em; }
+  .brand svg { width: 14px; height: 14px; color: var(--fill); }
+  .head { display: flex; align-items: center; gap: 14px; margin-top: 10px; }
+  .text { flex: 1; min-width: 0; }
+  h1 { margin: 0; font-size: 21px; line-height: 1.2; font-weight: 700; letter-spacing: -.02em;
+       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .subtitle { margin: 3px 0 0; font-size: 15px; font-weight: 500; color: var(--muted);
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .art { width: 52px; height: 52px; flex: none; border-radius: 50%; object-fit: cover; background: var(--button); }
+  .art.empty { display: grid; place-items: center; background: var(--fill); color: #03140a; }
+  .art.empty svg { width: 26px; height: 26px; }
+  .bar { height: 4px; margin-top: 16px; border-radius: 2px; background: var(--track); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--fill); transform-origin: left; transform: scaleX(0); }
+  .foot { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 12px; }
+  .footer { flex: 1; min-width: 0; font-size: 13px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  button { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border: 0; border-radius: 50%;
+           background: var(--button); color: var(--ink); cursor: pointer; padding: 0; font: inherit; }
+  button:hover { background: var(--button-hover); }
+  button:disabled { opacity: .35; cursor: default; background: var(--button); }
+  /* The button, not its icon, takes the click, so redrawing the icon cannot lose one. */
+  button svg, button .spinner { width: 14px; height: 14px; fill: currentColor; pointer-events: none; }
+  button:focus-visible { outline: 2px solid var(--fill); outline-offset: 2px; }
+
+  /* Add songs, and Up next */
+  .queue { border-top: 1px solid var(--line); padding: 12px 12px 10px; display: flex; flex-direction: column; gap: 8px; }
+  .search { position: relative; display: flex; align-items: center; margin: 0 4px; }
+  .search .icon { position: absolute; left: 10px; width: 16px; height: 16px; color: var(--faint); pointer-events: none;
+                  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .search.link .icon { color: var(--fill); }
+  .search input { flex: 1; min-width: 0; height: 34px; box-sizing: border-box; padding: 0 34px; border: 0; border-radius: 10px;
+                  background: var(--button); color: var(--ink); font: 14px -apple-system, system-ui, sans-serif; outline: none;
+                  user-select: text; -webkit-user-select: text; }
+  .search input::placeholder { color: var(--faint); }
+  .search input:focus { box-shadow: 0 0 0 2px var(--fill); }
+  .search input::-webkit-search-cancel-button { display: none; }
+  .search .end { position: absolute; right: 3px; width: 28px; height: 28px; display: grid; place-items: center;
+                 background: transparent; color: var(--faint); }
+  .search button.end:hover { background: var(--button-hover); color: var(--ink); }
+  .spinner { display: block; width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%;
+             border: 2px solid var(--track); border-top-color: var(--fill); animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+  .hint { margin: 0 6px; font-size: 12px; color: var(--fill); }
+  .hint.error { color: var(--danger); }
+  .listHead { display: flex; align-items: center; gap: 6px; min-height: 24px; margin: 2px 6px 0; }
+  .label { flex: 1; min-width: 0; font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--faint);
+           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .label b { color: var(--ink); font-weight: 600; text-transform: none; letter-spacing: 0; }
+  .textButton { width: auto; height: 24px; padding: 0 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+  .list { list-style: none; margin: 0; padding: 0; max-height: 296px; overflow-y: auto; overscroll-behavior: contain; }
+  .row { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 4px 6px; border-radius: 10px; }
+  /* Only search results do something, so only they light up. */
+  .row:has(button):hover { background: var(--button); }
+  .row:hover button:not(:hover, :disabled) { background: var(--button-hover); }
+  .thumb { width: 48px; height: 36px; flex: none; border-radius: 6px; object-fit: cover; background: var(--button); }
+  .row .text { display: flex; flex-direction: column; gap: 1px; }
+  .row .title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .detail { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--faint); }
+  .row .detail span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .badge { flex: none; font-size: 11px; font-weight: 600; color: var(--warn); }
+  .row.failed .badge { color: var(--danger); }
+  .row.failed .title { color: var(--faint); text-decoration: line-through; }
+  .row button.added { color: var(--fill); opacity: 1; }
+  .empty { padding: 14px 6px 8px; font-size: 13px; color: var(--faint); text-align: center; }
+  .more { width: 100%; height: 30px; border-radius: 10px; background: transparent; font-size: 12px; font-weight: 600; color: var(--faint); }
+  .more:hover { color: var(--ink); }
+</style>
+</head>
+<body>
+<main class="card" id="card">
+  <section class="now" id="now" title="Show the Music Station window">
+    <div class="brand">
+      <svg viewBox="4 4 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M9 20v-6M14 23V9M19 20v-8M24 18v-4"/></svg>
+      Music Station
+    </div>
+    <div class="head">
+      <div class="text">
+        <h1 id="title">Nothing playing</h1>
+        <p class="subtitle" id="subtitle"></p>
+      </div>
+      <img class="art" id="art" alt="" referrerpolicy="no-referrer" hidden>
+      <div class="art empty" id="noArt" aria-hidden="true">
+        <svg viewBox="4 4 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M9 20v-6M14 23V9M19 20v-8M24 18v-4"/></svg>
+      </div>
+    </div>
+    <div class="bar" id="bar" role="progressbar" aria-label="Song progress" aria-valuemin="0" aria-valuemax="100" hidden><i id="fill"></i></div>
+    <div class="foot">
+      <span class="footer" id="footer"></span>
+      <button id="toggle" type="button" disabled></button>
+      <button id="skip" type="button" aria-label="Skip for everyone" title="Skip for everyone" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.6a1 1 0 0 1 1.5-.86l9 6.4a1 1 0 0 1 0 1.72l-9 6.4A1 1 0 0 1 5 18.4z"/><rect x="17" y="4.5" width="2.6" height="15" rx="1.1"/></svg>
+      </button>
+    </div>
+  </section>
+
+  <section class="queue" id="queue" aria-label="Add songs and Up next" hidden>
+    <form class="search" id="form" role="search">
+      <svg class="icon" id="searchIcon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <svg class="icon" id="linkIcon" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></svg>
+      <input id="text" type="search" placeholder="Search or paste a YouTube link" aria-label="Search songs or paste a YouTube link"
+             aria-describedby="hint" maxlength="500" autocomplete="off" spellcheck="false">
+      <button class="end" id="clear" type="button" aria-label="Clear" title="Clear" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z"/></svg>
+      </button>
+      <span class="end" id="busy" role="status" aria-label="Working" hidden><span class="spinner"></span></span>
+    </form>
+    <p class="hint" id="hint" aria-live="polite" hidden></p>
+    <div class="listHead">
+      <span class="label" id="listLabel">Up next</span>
+      <button class="textButton" id="done" type="button" hidden>Done</button>
+    </div>
+    <ol class="list" id="list"></ol>
+    <button class="more" id="more" type="button" hidden></button>
+  </section>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id)
+  const ICONS = {
+    play: '<path d="M7 4.6a1 1 0 0 1 1.5-.86l11 7.4a1 1 0 0 1 0 1.72l-11 7.4A1 1 0 0 1 7 19.4z"/>',
+    pause: '<rect x="6" y="4" width="4" height="16" rx="1.2"/><rect x="14" y="4" width="4" height="16" rx="1.2"/>',
+    plus: '<path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/>',
+    check: '<path d="m9.5 16.2-4.2-4.2-1.4 1.4 5.6 5.6 11-11-1.4-1.4z"/>',
+  }
+  const svg = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`
+  // Only a hint: the station page decides whether the text is a YouTube link.
+  const LOOKS_LIKE_LINK = /^(https?:\/\/|www\.)|youtu\.?be/i
+  let view = null
+
+  // ---- The song ----
+
+  // The progress at a moment on this page's clock, moved on every frame while the song plays.
+  let bar = { progress: 0, speed: 0, since: 0 }
+  let frame = 0
+  function drawBar(now) {
+    const progress = Math.min(1, bar.progress + (bar.speed * (now - bar.since)) / 1000)
+    $('fill').style.transform = `scaleX(${progress})`
+    frame = bar.speed > 0 && progress < 1 ? requestAnimationFrame(drawBar) : 0
+  }
+
+  function render(next) {
+    view = next
+    $('title').textContent = view.title
+    $('title').title = view.title
+    $('subtitle').textContent = view.subtitle
+    $('footer').textContent = view.footer
+    if (view.thumbnail) {
+      if ($('art').getAttribute('src') !== view.thumbnail) $('art').src = view.thumbnail
+      $('art').hidden = false
+      $('noArt').hidden = true
+    } else {
+      $('art').hidden = true
+      $('noArt').hidden = false
+    }
+    $('bar').hidden = view.progress === null
+    cancelAnimationFrame(frame)
+    if (view.progress !== null) {
+      $('bar').setAttribute('aria-valuenow', String(Math.round(view.progress * 100)))
+      bar = { progress: view.progress, speed: view.speed, since: performance.now() }
+      drawBar(bar.since)
+    }
+    const toggle = $('toggle')
+    if (toggle.dataset.command !== view.toggle.command) {
+      toggle.dataset.command = view.toggle.command
+      toggle.innerHTML = svg(view.toggle.command)
+    }
+    toggle.setAttribute('aria-label', view.toggle.label)
+    toggle.title = view.toggle.label
+    toggle.disabled = !view.toggle.enabled
+    $('skip').disabled = !view.canSkip
+    $('queue').hidden = view.queue === null
+    if (!results) showQueue()
+  }
+
+  // ---- The list: Up next, or search results until Done ----
+
+  /** The search results on show, or null while the list shows Up next. */
+  let results = null
+  let drawn = ''
+
+  function row({ title, detail, thumbnail, badge, failed }) {
+    const li = document.createElement('li')
+    li.className = failed ? 'row failed' : 'row'
+    const img = document.createElement('img')
+    img.className = 'thumb'
+    img.alt = ''
+    img.referrerPolicy = 'no-referrer'
+    if (thumbnail) img.src = thumbnail
+    const text = document.createElement('div')
+    text.className = 'text'
+    const name = document.createElement('span')
+    name.className = 'title'
+    name.textContent = name.title = title
+    const line = document.createElement('span')
+    line.className = 'detail'
+    const what = document.createElement('span')
+    what.textContent = detail
+    line.append(what)
+    if (badge) line.append(Object.assign(document.createElement('span'), { className: 'badge', textContent: badge }))
+    text.append(name, line)
+    li.append(img, text)
+    return li
+  }
+
+  const empty = (message) => Object.assign(document.createElement('li'), { className: 'empty', textContent: message })
+
+  function showQueue() {
+    const queue = view?.queue
+    if (!queue) return
+    const key = JSON.stringify(queue)
+    if (key === drawn) return // redraws only on a change, so a hover or the scroll stays put
+    drawn = key
+    const total = queue.rows.length + queue.more
+    $('listLabel').textContent = total ? `Up next · ${total}` : 'Up next'
+    $('done').hidden = true
+    $('list').replaceChildren(
+      ...(queue.rows.length
+        ? queue.rows.map((r) => row({ ...r, failed: r.badge === 'Failed' }))
+        : [empty('Nothing up next. Search above to add a song.')]),
+    )
+    $('more').hidden = queue.more <= 0
+    $('more').textContent = `${queue.more} more in the Music Station window`
+  }
+
+  function clock(seconds) {
+    const s = Math.round(seconds)
+    const h = Math.floor(s / 3600)
+    const m = Math.floor((s % 3600) / 60)
+    return `${h ? `${h}:${String(m).padStart(2, '0')}` : m}:${String(s % 60).padStart(2, '0')}`
+  }
+
+  function showResults(query, found) {
+    results = found
+    drawn = ''
+    $('listLabel').replaceChildren('Results for ', Object.assign(document.createElement('b'), { textContent: `“${query}”` }))
+    $('done').hidden = false
+    $('more').hidden = true
+    $('list').scrollTop = 0
+    if (!found.length) {
+      $('list').replaceChildren(empty(`No songs found for “${query}”. Try other words, or paste a YouTube link.`))
+      return
+    }
+    $('list').replaceChildren(
+      ...found.map((result) => {
+        const li = row({
+          title: result.title,
+          detail: [result.channel, result.duration ? clock(result.duration) : ''].filter(Boolean).join(' · '),
+          thumbnail: result.thumbnail,
+        })
+        const add = document.createElement('button')
+        add.type = 'button'
+        add.innerHTML = svg('plus')
+        add.setAttribute('aria-label', `Add ${result.title}`)
+        add.title = 'Add to Up next'
+        add.addEventListener('click', () => addResult(add, result))
+        li.append(add)
+        return li
+      }),
+    )
+  }
+
+  // ---- The search box ----
+
+  let busy = false
+
+  function setHint(text, error = false) {
+    $('hint').textContent = text
+    $('hint').classList.toggle('error', error)
+    $('hint').hidden = !text
+  }
+
+  function setBusy(on) {
+    busy = on
+    $('busy').hidden = !on
+    $('clear').hidden = on || !$('text').value
+  }
+
+  function onType() {
+    const link = LOOKS_LIKE_LINK.test($('text').value.trim())
+    $('form').classList.toggle('link', link)
+    // Icons are SVG, which has no hidden property, so set the attribute.
+    $('searchIcon').toggleAttribute('hidden', link)
+    $('linkIcon').toggleAttribute('hidden', !link)
+    $('clear').hidden = busy || !$('text').value
+    setHint(link ? 'Press Return to add this video to Up next.' : '')
+  }
+
+  function clearSearch() {
+    $('text').value = ''
+    onType()
+    results = null
+    showQueue()
+  }
+
+  const failed = () => ({ ok: false, error: 'Something went wrong' })
+
+  async function submit(event) {
+    event.preventDefault()
+    const text = $('text').value.trim()
+    if (!text || busy) return
+    setBusy(true)
+    setHint('')
+    const reply = await window.desktopLocal.submit(text).catch(failed)
+    setBusy(false)
+    if (!reply.ok) return setHint(reply.error, true)
+    if (reply.results) return showResults(text, reply.results)
+    // A link went straight into the queue.
+    clearSearch()
+    setHint('Added to Up next.')
+  }
+
+  async function addResult(button, result) {
+    button.disabled = true
+    button.innerHTML = '<span class="spinner"></span>'
+    const reply = await window.desktopLocal.add(result.videoId).catch(failed)
+    if (!reply.ok) {
+      button.disabled = false
+      button.innerHTML = svg('plus')
+      return setHint(reply.error, true)
+    }
+    button.classList.add('added')
+    button.innerHTML = svg('check')
+    button.setAttribute('aria-label', `Added ${result.title}`)
+    button.title = 'Added to Up next'
+    setHint('')
+  }
+
+  // ---- Wiring ----
+
+  window.desktopLocal?.onCard(render)
+  $('toggle').addEventListener('click', (e) => {
+    e.stopPropagation()
+    if (view?.toggle.enabled) window.desktopLocal?.command(view.toggle.command)
+  })
+  $('skip').addEventListener('click', (e) => {
+    e.stopPropagation()
+    window.desktopLocal?.command('skip')
+  })
+  // The song part of the card opens the window, like a notification.
+  $('now').addEventListener('click', () => window.desktopLocal?.showWindow())
+  $('more').addEventListener('click', () => window.desktopLocal?.showWindow())
+  $('form').addEventListener('submit', submit)
+  $('text').addEventListener('input', onType)
+  $('clear').addEventListener('click', () => {
+    clearSearch()
+    $('text').focus()
+  })
+  $('done').addEventListener('click', () => {
+    clearSearch()
+    setHint('')
+  })
+  // Escape first clears the search, then hides the card.
+  addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      if ($('text').value || results) {
+        clearSearch()
+        setHint('')
+      } else window.desktopLocal?.hideCard()
+    },
+    true,
+  )
+  // The window takes the card's height, so it grows with the list.
+  new ResizeObserver(() => window.desktopLocal?.resizeCard($('card').offsetHeight)).observe($('card'))
+</script>
+</body>
+</html>
